@@ -89,11 +89,9 @@ class Game:
     # frames-per-second
     FPS = 50
 
-    def __init__(self):
+    def __init__(self, width=800, height=800):
         pygame.init()
         pygame.display.set_caption("CubeSat Simulator")
-        width = 800
-        height = 800
         window = (width, height)
         self.screen = pygame.display.set_mode(window)
         self.clock = pygame.time.Clock()
@@ -160,5 +158,6 @@ class Game:
 
 
 if __name__ == '__main__':
+    # Can specify the window size in the call to Game. The default is 800 x 800.
     game = Game()
     game.run()
