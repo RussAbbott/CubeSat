@@ -1,12 +1,16 @@
 
 from os import path
-from math import atan2, copysign, pi, pow
+from math import atan2, copysign, pi, pow, sqrt
 import pygame
 from pygame.math import Vector2
 from random import random, uniform
 
 
 class Params:
+    
+    # The simulation object itself is available here.
+    sim = None
+    
     # Simulator params and static methods
     # frames-per-second
     FPS = 50
@@ -31,6 +35,10 @@ class Params:
     max_angle_change = 2
 
     @staticmethod
+    def distance(a, b):
+        return sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
+
+    @staticmethod
     def limit_velocity(v2):
         if abs(v2.x) > Params.max_velocity:
             v2.x = copysign(Params.max_velocity, v2.x)
@@ -46,12 +54,13 @@ class Params:
     def target_repulsive_force(self_position, target_position):
         """
         Compute a virtual repulsive force from the target so that CubeSat
-        maintains a reasonable distance. The force decreases with the cube
-        of the distance between them. The actual numbers are arbitrary.
+        maintains a reasonable distance. The force decreases with the fourth
+        power of the distance between them. The actual numbers are arbitrary.
         """
-        dist_to_target_squared = (self_position.x-target_position.x)**2 + (self_position.y-target_position.y)**2
-        # The exponent is 1.5 since we are using the distance squared.
-        repulsive_force = 2E6/pow(dist_to_target_squared, 1.5)
+        dist_to_target = Params.distance(self_position, target_position)
+        # (self_position.x-target_position.x)**2 + (self_position.y-target_position.y)**2
+        # The exponent is 2 since we are using the distance squared.
+        repulsive_force = 1E9/pow(dist_to_target, 4)
         return repulsive_force
 
 
@@ -60,41 +69,37 @@ class Satellite:
     # Must define pos, vel, and angle as functions, which are executed at each instantiation.
     # Otherwise, they are executed only on the first instantiation, with those values used
     # for all future instantiations.
-    def __init__(self, pos=lambda: Params.V2(uniform(100, Params.window_width-100),
-                                             uniform(100, Params.window_height-100)),
-                       vel=lambda: Params.V2(uniform(-1, 1), uniform(-1, 1)),
-                       angle=lambda: uniform(-180, 180),
-                       image=None):
+    def __init__(self, pos=None, vel=None, angle=None, image=None):
 
         # pos, vel, and angle are with respect to the fixed window/plane
-        self.position = pos()
-        self.velocity = vel()
-        self.angle = angle()
+        self.position = pos if pos is not None else \
+                        Params.V2(uniform(100, Params.window_width-100), uniform(100, Params.window_height-100))
+        self.velocity = vel if pos is not None else Params.V2(uniform(-1, 1), uniform(-1, 1))
+        self.angle = angle if pos is not None else uniform(-180, 180)
 
         current_directory = path.dirname(path.abspath(__file__))
         image_path = path.join(current_directory, image)
         self.image = pygame.image.load(image_path)
 
-
-    def compute_velocity_correction(self, target_position):
-        """ Compute CubeSat velocity correction. """
-        desired_direction = target_position - self.position
-        correction = desired_direction - self.velocity
-
-        # Act as if there is a repulsive force from target to maintain a distance.
-        repulsive_force = Params.target_repulsive_force(self.position, target_position)
-        move_toward_target = 1 - repulsive_force
-        # Allow correction to have an absolute value > 1.
-        # update_cubesat_velocity imposes a speed limit.
-        correction = move_toward_target * correction
-        return correction
-
-    def compute_angle_correction(self, target_position):
+    def compute_angle_correction(self):
         """ Compute CubeSat angle correction. """
+        target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
         correction = rel_angle - self.angle
         return Params.normalize_angle(correction)
+
+    def compute_velocity_correction(self):
+        """ Compute CubeSat velocity correction. """
+        target_position = Params.sim.target.position
+        desired_direction = target_position - self.position
+        correction = desired_direction - self.velocity
+
+        # To maintain a distance, act as if there is a repulsive force from target.
+        repulsive_force = Params.target_repulsive_force(self.position, target_position)
+        move_toward_target = 1 - repulsive_force
+        correction = move_toward_target * correction
+        return correction
 
     def update_angle(self, correction):
         if abs(correction) > Params.max_angle_change:
@@ -105,10 +110,15 @@ class Satellite:
     def update_cubesat_velocity(self, correction):
         self.velocity += correction
         self.velocity = Params.limit_velocity(self.velocity)
+        # If we are too close to the target, speed up. (Very ad hoc.)
+        dist_to_target = Params.distance(self.position, Params.sim.target.position)
+        if dist_to_target < 100:
+            self.velocity *= 1.8
+
 
     def update_target_velocity(self):
         # Change direction every once in a while
-        if random() < 0.01:
+        if random() < 0.008:
             self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
 
         # Don't go go off the screen. (Respond to virtual repulsion force from screen edges.)
@@ -125,13 +135,13 @@ class Satellite:
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat: 1.5 vs 1.
         # The actual numbers are arbitrary.
-        if abs(self.velocity.x) < 0.4:
+        if abs(self.velocity.x) < 0.75:
             self.velocity.x *= 2
-        if abs(self.velocity.x) > 1.5:
+        if abs(self.velocity.x) > 1.9:
             self.velocity.x *= 0.7
-        if abs(self.velocity.y) < 0.4:
+        if abs(self.velocity.y) < 0.75:
             self.velocity.y *= 2
-        if abs(self.velocity.y) > 1.5:
+        if abs(self.velocity.y) > 1.9:
             self.velocity.y *= 0.7
 
     def update_velocity(self, correction):
@@ -145,6 +155,7 @@ class Satellite:
 class Sim:
 
     def __init__(self):
+        Params.sim = self
         pygame.init()
         pygame.display.set_caption("CubeSat Simulator")
         window_dimensions = (Params.window_width, Params.window_height)
@@ -176,13 +187,13 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            cubesat_velocity_correction = self.cubesat.compute_velocity_correction(self.target.position)
+            cubesat_velocity_correction = self.cubesat.compute_velocity_correction()
             self.cubesat.update_velocity(cubesat_velocity_correction)
             self.cubesat.update_position()
 
             # CubeSat does not have a rotational velocity. It is always at a fixed angle, which
             # changes frame-by-frame.
-            cubesat_angle_correction = self.cubesat.compute_angle_correction(self.target.position)
+            cubesat_angle_correction = self.cubesat.compute_angle_correction()
             self.cubesat.update_angle(cubesat_angle_correction)
 
             self.target.update_velocity(None)
