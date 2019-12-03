@@ -32,7 +32,7 @@ class Satellite:
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
         correction = (rel_angle - self.angle) % 360
-        return self.normalize_angle(correction)  # + 180) % 360 - 180
+        return self.normalize_angle(correction)
 
     def limit(self, v2):
         if abs(v2.x) > self.max_velocity:
