@@ -1,6 +1,6 @@
 
 from os import path
-from math import atan2, copysign, pi, pow, sqrt
+from math import atan2, copysign, pi, sqrt
 import pygame
 from pygame.math import Vector2
 from random import random, uniform
@@ -8,17 +8,19 @@ from random import random, uniform
 
 class Params:
     
-    # The simulation object itself is available here.
+    # ==================================================================================
+    # The simulation object itself is available here. It stores the positions of
+    # both CubeSat and the target, in Euclidian pixel coordinates. (Upper left is (0,0).)
     sim = None
     
     # Simulator params and static methods
     # frames-per-second
     FPS = 50
 
-    # Window dimensions. These are also plane dimensions.
-    # As both window and plane dimensions. (0,0) is at the upper left
-    window_width = 800
-    window_height = 800
+    # Window dimensions, in pixels. These are also plane dimensions and are taken as plane units.
+    # As both window and plane dimensions. (0,0) is at the upper left.
+    window_width = 800   # pixels
+    window_height = 800  # pixels
 
     @staticmethod
     def roundV2(v2: Vector2, prec=2):
@@ -29,26 +31,62 @@ class Params:
         # noinspection PyArgumentList
         return Vector2(x, y)
 
+    # ==================================================================================
     # Satellite params and static methods
-    # These are change limits per frame.
-    max_velocity = 1
-    max_angle_change = 2
+    # Velocities are pizels per frame.
+    
+    # CubeSat
+    cubesat_max_velocity = 1  # pixels / frame
+    # pygame uses degrees for angeles rather than radians
+    cubesat_max_angle_change = 2  # degrees/frame
+    
+    # Target
+    target_max_velocity = 1.9   # pixels / frame
+    target_min_velocity = 0.75  # pixels / frame
+
+    # Probability of changing velocity each frame.
+    # About once every second and a half.
+    prob_change_vel = 0.009
+
 
     @staticmethod
     def distance(a, b):
         return sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
 
     @staticmethod
-    def limit_velocity(v2):
-        if abs(v2.x) > Params.max_velocity:
-            v2.x = copysign(Params.max_velocity, v2.x)
-        if abs(v2.y) > Params.max_velocity:
-            v2.y = copysign(Params.max_velocity, v2.y)
+    def limit_cubesat_velocity(v2):
+        if abs(v2.x) > Params.cubesat_max_velocity:
+            v2.x = copysign(Params.cubesat_max_velocity, v2.x)
+        if abs(v2.y) > Params.cubesat_max_velocity:
+            v2.y = copysign(Params.cubesat_max_velocity, v2.y)
         return v2
 
     @staticmethod
     def normalize_angle(angle):
         return (angle + 180) % 360 - 180
+
+    @staticmethod
+    def stay_inbounds_force(position):
+        """
+        Don't go go off the screen. (Respond to virtual repulsion force from screen edges.)
+        The force is treated as always existing. It's strength depends on how close the
+        position is to an edge. The exponent in the denominator must be odd to retain
+        the sign of the value it is raising to a power. Other than that, the numbers
+        are arbitrary.
+        """
+        delta_x = min(1, Params.window_width**3/position.x**5) + \
+                  max(-1, Params.window_width**3/(position.x-Params.window_width)**5)
+        delta_y = min(1, Params.window_height**3/position.y**5) + \
+                  max(-1, Params.window_height**3/(position.y-Params.window_height)**5)
+        return Params.V2(delta_x, delta_y)
+
+    @staticmethod
+    def stay_in_screen(position):
+        """
+        Rigidly keep the position within the screen.
+        """
+        position.x = max(50, min(Params.window_width-50, position.x))
+        position.y = max(50, min(Params.window_height-50, position.y))
 
     @staticmethod
     def target_repulsive_force(self_position, target_position):
@@ -58,30 +96,25 @@ class Params:
         power of the distance between them. The actual numbers are arbitrary.
         """
         dist_to_target = Params.distance(self_position, target_position)
-        # (self_position.x-target_position.x)**2 + (self_position.y-target_position.y)**2
-        # The exponent is 2 since we are using the distance squared.
-        repulsive_force = 1E9/pow(dist_to_target, 4)
+        repulsive_force = 1E9/dist_to_target**4
         return repulsive_force
 
 
 class Satellite:
 
-    # Must define pos, vel, and angle as functions, which are executed at each instantiation.
-    # Otherwise, they are executed only on the first instantiation, with those values used
-    # for all future instantiations.
     def __init__(self, pos=None, vel=None, angle=None, image=None):
 
         # pos, vel, and angle are with respect to the fixed window/plane
         self.position = pos if pos is not None else \
                         Params.V2(uniform(100, Params.window_width-100), uniform(100, Params.window_height-100))
-        self.velocity = vel if pos is not None else Params.V2(uniform(-1, 1), uniform(-1, 1))
-        self.angle = angle if pos is not None else uniform(-180, 180)
+        self.velocity = vel if vel is not None else Params.V2(uniform(-2, 2), uniform(-2, 2))
+        self.angle = angle if angle is not None else uniform(-180, 180)
 
         current_directory = path.dirname(path.abspath(__file__))
         image_path = path.join(current_directory, image)
         self.image = pygame.image.load(image_path)
 
-    def compute_angle_correction(self):
+    def cubesat_angle_correction(self):
         """ Compute CubeSat angle correction. """
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
@@ -89,7 +122,7 @@ class Satellite:
         correction = rel_angle - self.angle
         return Params.normalize_angle(correction)
 
-    def compute_velocity_correction(self):
+    def cubesat_velocity_correction(self):
         """ Compute CubeSat velocity correction. """
         target_position = Params.sim.target.position
         desired_direction = target_position - self.position
@@ -101,47 +134,37 @@ class Satellite:
         correction = move_toward_target * correction
         return correction
 
-    def update_angle(self, correction):
-        if abs(correction) > Params.max_angle_change:
-            correction = copysign(Params.max_angle_change, correction)
+    def update_cubesat_angle(self, correction):
+        if abs(correction) > Params.cubesat_max_angle_change:
+            correction = copysign(Params.cubesat_max_angle_change, correction)
         new_angle = Params.normalize_angle(self.angle + correction)
         self.angle = new_angle
 
     def update_cubesat_velocity(self, correction):
         self.velocity += correction
-        self.velocity = Params.limit_velocity(self.velocity)
+        self.velocity = Params.limit_cubesat_velocity(self.velocity)
         # If we are too close to the target, speed up. (Very ad hoc.)
         dist_to_target = Params.distance(self.position, Params.sim.target.position)
         if dist_to_target < 100:
             self.velocity *= 1.8
 
-
     def update_target_velocity(self):
         # Change direction every once in a while
-        if random() < 0.008:
+        if random() < Params.prob_change_vel:
             self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
 
-        # Don't go go off the screen. (Respond to virtual repulsion force from screen edges.)
-        # The force is treated as always existing. It's strength depends on how close the
-        # target is to an edge. The exponent in the denominator must be odd to retain
-        # the sign of the value it is raising to a power. Other than that, the numbers
-        # are arbitrary.
-        delta_x = min(1, Params.window_width**3/self.position.x**5) + \
-                  max(-1, Params.window_width**3/(self.position.x-Params.window_width)**5)
-        delta_y = min(1, Params.window_height**3/self.position.y**5) + \
-                  max(-1, Params.window_height**3/(self.position.y-Params.window_height)**5)
-        self.velocity += Params.V2(delta_x, delta_y)
+        self.velocity += Params.stay_inbounds_force(self.position)   # V2(delta_x, delta_y)
 
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat: 1.5 vs 1.
         # The actual numbers are arbitrary.
-        if abs(self.velocity.x) < 0.75:
+        if abs(self.velocity.x) < Params.target_min_velocity:
             self.velocity.x *= 2
-        if abs(self.velocity.x) > 1.9:
+        if abs(self.velocity.x) > Params.target_max_velocity:
             self.velocity.x *= 0.7
-        if abs(self.velocity.y) < 0.75:
+        if abs(self.velocity.y) < Params.target_min_velocity:
             self.velocity.y *= 2
-        if abs(self.velocity.y) > 1.9:
+        if abs(self.velocity.y) > Params.target_max_velocity:
             self.velocity.y *= 0.7
 
     def update_velocity(self, correction):
@@ -150,6 +173,7 @@ class Satellite:
 
     def update_position(self):
         self.position += self.velocity
+        Params.stay_in_screen(self.position)
 
 
 class Sim:
@@ -187,14 +211,14 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            cubesat_velocity_correction = self.cubesat.compute_velocity_correction()
+            cubesat_velocity_correction = self.cubesat.cubesat_velocity_correction()
             self.cubesat.update_velocity(cubesat_velocity_correction)
             self.cubesat.update_position()
 
             # CubeSat does not have a rotational velocity. It is always at a fixed angle, which
             # changes frame-by-frame.
-            cubesat_angle_correction = self.cubesat.compute_angle_correction()
-            self.cubesat.update_angle(cubesat_angle_correction)
+            cubesat_angle_correction = self.cubesat.cubesat_angle_correction()
+            self.cubesat.update_cubesat_angle(cubesat_angle_correction)
 
             self.target.update_velocity(None)
             self.target.update_position()
@@ -205,4 +229,5 @@ class Sim:
 
 
 if __name__ == '__main__':
+    # See the Params class for constants and static methods.
     Sim().run()
