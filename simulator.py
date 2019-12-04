@@ -153,7 +153,7 @@ class Satellite:
         if random() < Params.prob_change_vel:
             self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
 
-        self.velocity += Params.stay_inbounds_force(self.position)   # V2(delta_x, delta_y)
+        self.velocity += Params.stay_inbounds_force(self.position)
 
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat: 1.5 vs 1.
@@ -173,7 +173,6 @@ class Satellite:
 
     def update_position(self):
         self.position += self.velocity
-        Params.stay_in_screen(self.position)
 
 
 class Sim:
@@ -196,7 +195,10 @@ class Sim:
     def add_obj_to_screen(self, obj):
         obj_display = pygame.transform.rotate(obj.image, obj.angle)
         rect = obj_display.get_rect( )
-        self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
+        try:
+            self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
+        except:
+            print(obj.position, rect,  obj.position - (rect.width/2, rect.height/2))
 
     def refresh_screen(self):
         self.screen.fill((0, 0, 0))
