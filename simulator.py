@@ -195,10 +195,7 @@ class Sim:
     def add_obj_to_screen(self, obj):
         obj_display = pygame.transform.rotate(obj.image, obj.angle)
         rect = obj_display.get_rect( )
-        try:
-            self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
-        except:
-            print(obj.position, rect,  obj.position - (rect.width/2, rect.height/2))
+        self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
 
     def refresh_screen(self):
         self.screen.fill((0, 0, 0))
