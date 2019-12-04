@@ -190,7 +190,7 @@ class Sim:
         # Use an ArUco marker for the target
         self.target = Satellite(image="ArUcoTarget.png")
 
-        self.exit = False
+        self.exit = False 
 
     def add_obj_to_screen(self, obj):
         obj_display = pygame.transform.rotate(obj.image, obj.angle)
