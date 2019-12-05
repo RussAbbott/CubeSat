@@ -205,6 +205,7 @@ class Sim:
     def __init__(self):
         # Make this object itself available in the Params class.
         Params.sim = self
+        
         pygame.init()
         pygame.display.set_caption("CubeSat Simulator")
         window_dimensions = (Params.window_width, Params.window_height)
