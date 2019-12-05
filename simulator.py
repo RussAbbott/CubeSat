@@ -5,6 +5,12 @@ import pygame
 from pygame.math import Vector2
 from random import random, uniform
 
+"""
+This code consists of three classes.
+Params: A collection of constants and static methods
+Satellite: A class of which both CubeSat and the target are instances.
+Sim: The simulation infrastructure
+"""
 
 class Params:
     
@@ -94,6 +100,9 @@ class Params:
         Compute a virtual repulsive force from the target so that CubeSat
         maintains a reasonable distance. The force decreases with the fourth
         power of the distance between them. The actual numbers are arbitrary.
+        Doing it this way makes the relationship between the two smoother and
+        more fluid. An alternative might have been to keep CubeSat a fixed
+        distance away from the target.
         """
         dist_to_target = Params.distance(self_position, target_position)
         repulsive_force = 1E9/dist_to_target**4
@@ -115,7 +124,7 @@ class Satellite:
         self.image = pygame.image.load(image_path)
 
     def cubesat_angle_correction(self):
-        """ Compute CubeSat angle correction. """
+        """ Compute CubeSat angle correction for the current frame update. """
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
@@ -123,7 +132,7 @@ class Satellite:
         return Params.normalize_angle(correction)
 
     def cubesat_velocity_correction(self):
-        """ Compute CubeSat velocity correction. """
+        """ Compute CubeSat velocity correction for the current frame update. """
         target_position = Params.sim.target.position
         desired_direction = target_position - self.position
         correction = desired_direction - self.velocity
@@ -135,12 +144,24 @@ class Satellite:
         return correction
 
     def update_cubesat_angle(self, correction):
+        """
+        Update the CubeSat heading (it's angle). Limit the maximum
+        change that can occur in any frame. If the entire correction
+        does not occur during the current frame, it will continue
+        (possibly adjusted) in the next frame.
+        """
         if abs(correction) > Params.cubesat_max_angle_change:
             correction = copysign(Params.cubesat_max_angle_change, correction)
         new_angle = Params.normalize_angle(self.angle + correction)
         self.angle = new_angle
 
     def update_cubesat_velocity(self, correction):
+        """
+        Update the CubeSat velocity. Limit the maximum change that
+        can occur in any frame. If the entire correction does not
+        occur during the current frame, it will continue (possibly
+        adjusted) in the next frame.
+        """
         self.velocity += correction
         self.velocity = Params.limit_cubesat_velocity(self.velocity)
         # If we are too close to the target, speed up. (Very ad hoc.)
@@ -149,6 +170,10 @@ class Satellite:
             self.velocity *= 1.8
 
     def update_target_velocity(self):
+        """
+        Update the target velocity--for this frame. These change
+        are arbitrary and get the target to move around the screen.
+        """
         # Change direction every once in a while
         if random() < Params.prob_change_vel:
             self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
@@ -178,6 +203,7 @@ class Satellite:
 class Sim:
 
     def __init__(self):
+        # Make this object itself available in the Params class.
         Params.sim = self
         pygame.init()
         pygame.display.set_caption("CubeSat Simulator")
@@ -190,20 +216,26 @@ class Sim:
         # Use an ArUco marker for the target
         self.target = Satellite(image="ArUcoTarget.png")
 
-        self.exit = False 
+        self.exit = False
 
     def add_obj_to_screen(self, obj):
+        """ Update the screen "surface" before displaying it. """
         obj_display = pygame.transform.rotate(obj.image, obj.angle)
         rect = obj_display.get_rect( )
         self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
 
     def refresh_screen(self):
+        """
+        Refresh the screen. Create a black background and
+        put the two objects in the surface. Then make it visible.
+        """
         self.screen.fill((0, 0, 0))
         self.add_obj_to_screen(self.target)
         self.add_obj_to_screen(self.cubesat)
         pygame.display.flip()
 
     def run(self):
+        """ The main loop. """
         while not self.exit:
             # Event queue
             for event in pygame.event.get():
@@ -214,8 +246,8 @@ class Sim:
             self.cubesat.update_velocity(cubesat_velocity_correction)
             self.cubesat.update_position()
 
-            # CubeSat does not have a rotational velocity. It is always at a fixed angle, which
-            # changes frame-by-frame.
+            # CubeSat does not have a rotational velocity. It is always at a fixed angle,
+            # which changes frame-by-frame.
             cubesat_angle_correction = self.cubesat.cubesat_angle_correction()
             self.cubesat.update_cubesat_angle(cubesat_angle_correction)
 
@@ -228,5 +260,4 @@ class Sim:
 
 
 if __name__ == '__main__':
-    # See the Params class for constants and static methods.
     Sim().run()
