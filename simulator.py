@@ -164,10 +164,10 @@ class Satellite:
         """
         self.velocity += correction
         self.velocity = Params.limit_cubesat_velocity(self.velocity)
-        # If we are too close to the target, speed up. (Very ad hoc.)
+        # If we are too close to the target, backpedal faster. (Very ad hoc.)
         dist_to_target = Params.distance(self.position, Params.sim.target.position)
-        if dist_to_target < 100:
-            self.velocity *= 1.8
+        velocity_multiplier = max(1, (125/max(dist_to_target, 50))**2)
+        self.velocity *= velocity_multiplier
 
     def update_target_velocity(self):
         """
