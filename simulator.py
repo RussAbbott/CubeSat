@@ -80,10 +80,10 @@ class Params:
         the sign of the value it is raising to a power. Other than that, the numbers
         are arbitrary.
         """
-        delta_x = min(1, Params.window_width**3/position.x**5) + \
-                  max(-1, Params.window_width**3/(position.x-Params.window_width)**5)
-        delta_y = min(1, Params.window_height**3/position.y**5) + \
-                  max(-1, Params.window_height**3/(position.y-Params.window_height)**5)
+        delta_x = min(1, Params.window_width**5/position.x**9) + \
+                  max(-1, Params.window_width**5/(position.x-Params.window_width)**9)
+        delta_y = min(1, Params.window_height**5/position.y**9) + \
+                  max(-1, Params.window_height**5/(position.y-Params.window_height)**9)
         return Params.V2(delta_x, delta_y)
 
     @staticmethod
@@ -141,6 +141,7 @@ class Satellite:
         repulsive_force = Params.target_repulsive_force(self.position, target_position)
         move_toward_target = 1 - repulsive_force
         correction = move_toward_target * correction
+
         return correction
 
     def update_cubesat_angle(self, correction):
@@ -168,6 +169,13 @@ class Satellite:
         dist_to_target = Params.distance(self.position, Params.sim.target.position)
         velocity_multiplier = max(1, (125/max(dist_to_target, 50))**2)
         self.velocity *= velocity_multiplier
+        # if dist_to_target < 100:
+        #     target_velocity = Params.sim.target.velocity
+        #     velocity_ratio = (self.velocity.x / self.velocity.y) / (target_velocity.x / target_velocity.y)
+        #     if 0.9 < velocity_ratio < 1.1:
+        #         print(round(velocity_ratio, 2))
+        #         correction.x += 10
+        #         correction.y -= 10
 
     def update_target_velocity(self):
         """
