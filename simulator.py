@@ -12,6 +12,7 @@ Satellite: A class of which both CubeSat and the target are instances.
 Sim: The simulation infrastructure
 """
 
+
 class Params:
     
     # ==================================================================================
@@ -54,7 +55,6 @@ class Params:
     # About once every second and a half.
     prob_change_vel = 0.009
 
-
     @staticmethod
     def distance(a, b):
         return sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
@@ -71,20 +71,20 @@ class Params:
     def normalize_angle(angle):
         return (angle + 180) % 360 - 180
 
-    @staticmethod
-    def stay_inbounds_force(position):
-        """
-        Don't go go off the screen. (Respond to virtual repulsion force from screen edges.)
-        The force is treated as always existing. It's strength depends on how close the
-        position is to an edge. The exponent in the denominator must be odd to retain
-        the sign of the value it is raising to a power. Other than that, the numbers
-        are arbitrary.
-        """
-        delta_x = min(1, Params.window_width**5/position.x**9) + \
-                  max(-1, Params.window_width**5/(position.x-Params.window_width)**9)
-        delta_y = min(1, Params.window_height**5/position.y**9) + \
-                  max(-1, Params.window_height**5/(position.y-Params.window_height)**9)
-        return Params.V2(delta_x, delta_y)
+    # @staticmethod
+    # def stay_inbounds_force(position):
+    #     """
+    #     Don't go go off the screen. (Respond to virtual repulsion force from screen edges.)
+    #     The force is treated as always existing. It's strength depends on how close the
+    #     position is to an edge. The exponent in the denominator must be odd to retain
+    #     the sign of the value it is raising to a power. Other than that, the numbers
+    #     are arbitrary.
+    #     """
+    #     delta_x = min(1, Params.window_width**5/position.x**9) + \
+    #               max(-1, Params.window_width**5/(position.x-Params.window_width)**9)
+    #     delta_y = min(1, Params.window_height**5/position.y**9) + \
+    #               max(-1, Params.window_height**5/(position.y-Params.window_height)**9)
+    #     return Params.V2(delta_x, delta_y)
 
     @staticmethod
     def stay_in_screen(position):
@@ -167,6 +167,7 @@ class Satellite:
         self.velocity = Params.limit_cubesat_velocity(self.velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
         dist_to_target = Params.distance(self.position, Params.sim.target.position)
+        # noinspection PyTypeChecker
         velocity_multiplier = max(1, (125/max(dist_to_target, 50))**2)
         self.velocity *= velocity_multiplier
         # if dist_to_target < 100:
@@ -185,8 +186,13 @@ class Satellite:
         # Change direction every once in a while
         if random() < Params.prob_change_vel:
             self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
+        # If too close to the window walls or CubeSat, reverse direction
+        if (self.position.x == 50 or self.position.x == Params.window_width - 50) and \
+                (self.position.y == 50 or self.position.y == Params.window_height - 50) or \
+                Params.distance(self.position, Params.sim.cubesat.position) < 70:
+            self.velocity *= -1
 
-        self.velocity += Params.stay_inbounds_force(self.position)
+        # self.velocity += Params.stay_inbounds_force(self.position)
 
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat: 1.5 vs 1.
@@ -206,6 +212,11 @@ class Satellite:
 
     def update_position(self):
         self.position += self.velocity
+        Params.stay_in_screen(self.position)
+        # if self is Params.sim.target and \
+        #         (self.position.x == 50 or self.position.x == Params.window_width-50) and \
+        #         (self.position.y == 50 or self.position.y == Params.window_height-50):
+        #     self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
 
 
 class Sim:
@@ -230,7 +241,7 @@ class Sim:
     def add_obj_to_screen(self, obj):
         """ Update the screen "surface" before displaying it. """
         obj_display = pygame.transform.rotate(obj.image, obj.angle)
-        rect = obj_display.get_rect( )
+        rect = obj_display.get_rect()
         self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
 
     def refresh_screen(self):
