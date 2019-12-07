@@ -45,7 +45,7 @@ class Params:
     # CubeSat
     cubesat_max_velocity = 1  # pixels / frame
     # pygame uses degrees for angeles rather than radians
-    cubesat_max_angle_change = 2  # degrees/frame
+    cubesat_max_angle_change = 0.5  # degrees/frame
     
     # Target
     target_max_velocity = 1.9   # pixels / frame
@@ -70,21 +70,6 @@ class Params:
     @staticmethod
     def normalize_angle(angle):
         return (angle + 180) % 360 - 180
-
-    # @staticmethod
-    # def stay_inbounds_force(position):
-    #     """
-    #     Don't go go off the screen. (Respond to virtual repulsion force from screen edges.)
-    #     The force is treated as always existing. It's strength depends on how close the
-    #     position is to an edge. The exponent in the denominator must be odd to retain
-    #     the sign of the value it is raising to a power. Other than that, the numbers
-    #     are arbitrary.
-    #     """
-    #     delta_x = min(1, Params.window_width**5/position.x**9) + \
-    #               max(-1, Params.window_width**5/(position.x-Params.window_width)**9)
-    #     delta_y = min(1, Params.window_height**5/position.y**9) + \
-    #               max(-1, Params.window_height**5/(position.y-Params.window_height)**9)
-    #     return Params.V2(delta_x, delta_y)
 
     @staticmethod
     def stay_in_screen(position):
@@ -170,13 +155,6 @@ class Satellite:
         # noinspection PyTypeChecker
         velocity_multiplier = max(1, (125/max(dist_to_target, 50))**2)
         self.velocity *= velocity_multiplier
-        # if dist_to_target < 100:
-        #     target_velocity = Params.sim.target.velocity
-        #     velocity_ratio = (self.velocity.x / self.velocity.y) / (target_velocity.x / target_velocity.y)
-        #     if 0.9 < velocity_ratio < 1.1:
-        #         print(round(velocity_ratio, 2))
-        #         correction.x += 10
-        #         correction.y -= 10
 
     def update_target_velocity(self):
         """
@@ -192,10 +170,8 @@ class Satellite:
                 Params.distance(self.position, Params.sim.cubesat.position) < 70:
             self.velocity *= -1
 
-        # self.velocity += Params.stay_inbounds_force(self.position)
-
         # Ensure that the target is moving at a reasonable speed.
-        # Allow it to move faster than CubeSat: 1.5 vs 1.
+        # Allow it to move faster than CubeSat: 1.9 to 1.
         # The actual numbers are arbitrary.
         if abs(self.velocity.x) < Params.target_min_velocity:
             self.velocity.x *= 2
@@ -213,16 +189,13 @@ class Satellite:
     def update_position(self):
         self.position += self.velocity
         Params.stay_in_screen(self.position)
-        # if self is Params.sim.target and \
-        #         (self.position.x == 50 or self.position.x == Params.window_width-50) and \
-        #         (self.position.y == 50 or self.position.y == Params.window_height-50):
-        #     self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
 
 
 class Sim:
 
     def __init__(self):
-        # Make this object itself available in the Params class.
+        # Make this Sim object itself available in the Params class. The two
+        # satellites use it to retrieve information about each other.
         Params.sim = self
         
         pygame.init()
@@ -257,7 +230,7 @@ class Sim:
     def run(self):
         """ The main loop. """
         while not self.exit:
-            # Event queue
+            # Event queue.  Not used here, but standard in pygame applications.
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.exit = True
