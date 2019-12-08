@@ -1,9 +1,10 @@
 
-from os import path
 from math import atan2, copysign, pi, sqrt
+from os import path
+from random import choice, random, uniform
+
 import pygame
 from pygame.math import Vector2
-from random import random, uniform
 
 """
 This code consists of three classes.
@@ -29,6 +30,15 @@ class Params:
     window_width = 800   # pixels
     window_height = 800  # pixels
 
+    # Must set this outside the class(?)
+    screen_center = None
+
+    # recenter_mode:    False: the objects are unable to penetrate the window borders
+    #                   True: the object are recentered in the window when they approach a window border
+    recenter_mode = True
+    recentering = False
+    centered_enough = 50
+
     @staticmethod
     def roundV2(v2: Vector2, prec=2):
         return Params.V2(round(v2.x, prec), round(v2.y, prec))
@@ -44,27 +54,36 @@ class Params:
     
     # CubeSat
     cubesat_max_velocity = 1  # pixels / frame
-    # pygame uses degrees for angeles rather than radians
+    # pygame uses degrees rather than radians
     cubesat_max_angle_change = 0.5  # degrees/frame
-    
+
+    # For when not in rd_mode
+    directional_ticks_limit = 50
+
     # Target
     target_max_velocity = 1.9   # pixels / frame
     target_min_velocity = 0.75  # pixels / frame
+    target_vel_change = 0.5
 
     # Probability of changing velocity each frame.
     # About once every second and a half.
     prob_change_vel = 0.009
+    
+    @staticmethod
+    def at_edge_of_screen(position):
+        return not (50 < position.x < Params.window_width-50) or not (50 < position.y < Params.window_height-50)
+
 
     @staticmethod
     def distance(a, b):
         return sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
 
     @staticmethod
-    def limit_cubesat_velocity(v2):
-        if abs(v2.x) > Params.cubesat_max_velocity:
-            v2.x = copysign(Params.cubesat_max_velocity, v2.x)
-        if abs(v2.y) > Params.cubesat_max_velocity:
-            v2.y = copysign(Params.cubesat_max_velocity, v2.y)
+    def limit_velocity(v2, max_velocity):
+        if abs(v2.x) > max_velocity:
+            v2.x = copysign(max_velocity, v2.x)
+        if abs(v2.y) > max_velocity:
+            v2.y = copysign(max_velocity, v2.y)
         return v2
 
     @staticmethod
@@ -72,12 +91,18 @@ class Params:
         return (angle + 180) % 360 - 180
 
     @staticmethod
-    def stay_in_screen(position):
-        """
-        Rigidly keep the position within the screen.
-        """
-        position.x = max(50, min(Params.window_width-50, position.x))
-        position.y = max(50, min(Params.window_height-50, position.y))
+    def recenter_all():
+        (pos1, pos2) = (Params.sim.cubesat.position, Params.sim.target.position)
+        center_point = (pos1 + pos2) / 2
+        correction = Params.screen_center - center_point
+        if correction.magnitude() < 5:
+            Params.recentering = False
+            return
+        max_speed = 2.5*Params.cubesat_max_velocity
+        while abs(correction.x) > max_speed or abs(correction.y) > max_speed:
+            correction *= 0.9
+        pos1 += correction
+        pos2 += correction
 
     @staticmethod
     def target_repulsive_force(self_position, target_position):
@@ -96,7 +121,7 @@ class Params:
 
 class Satellite:
 
-    def __init__(self, pos=None, vel=None, angle=None, image=None):
+    def __init__(self, pos=None, vel=None, angle=None, image=None, degraded=True):
 
         # pos, vel, and angle are with respect to the fixed window/plane
         self.position = pos if pos is not None else \
@@ -107,17 +132,37 @@ class Satellite:
         current_directory = path.dirname(path.abspath(__file__))
         image_path = path.join(current_directory, image)
         self.image = pygame.image.load(image_path)
+        self.degraded = degraded
+        self.ticks = 0
 
     def cubesat_angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
+
+        if not self.in_rotation_mode():
+            return 0
+
+        # Update the angle if degraded or if in the rotation phase (ticks == 0) of non-degraded
+        self.velocity = Params.V2(0, 0)
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
-        correction = rel_angle - self.angle
-        return Params.normalize_angle(correction)
+        correction = Params.normalize_angle(rel_angle - self.angle)
+        # If we are pointing to the target, switch to directional mode (ticks = 1).
+        if abs(correction) < 1:
+            self.ticks = 1
+        return correction
 
     def cubesat_velocity_correction(self):
         """ Compute CubeSat velocity correction for the current frame update. """
+        if self.in_rotation_mode():
+            self.velocity = Params.V2(0, 0)
+            return Params.V2(0, 0)
+
+        self.ticks = (self.ticks + 1) % Params.directional_ticks_limit
+
+        if self.degraded and self.ticks > 10:
+            return Params.V2(0, 0)
+
         target_position = Params.sim.target.position
         desired_direction = target_position - self.position
         correction = desired_direction - self.velocity
@@ -126,8 +171,10 @@ class Satellite:
         repulsive_force = Params.target_repulsive_force(self.position, target_position)
         move_toward_target = 1 - repulsive_force
         correction = move_toward_target * correction
-
         return correction
+
+    def in_rotation_mode(self):
+        return not self.degraded or self.ticks == 0
 
     def update_cubesat_angle(self, correction):
         """
@@ -149,7 +196,7 @@ class Satellite:
         adjusted) in the next frame.
         """
         self.velocity += correction
-        self.velocity = Params.limit_cubesat_velocity(self.velocity)
+        Params.limit_velocity(self.velocity, Params.cubesat_max_velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
         dist_to_target = Params.distance(self.position, Params.sim.target.position)
         # noinspection PyTypeChecker
@@ -163,11 +210,13 @@ class Satellite:
         """
         # Change direction every once in a while
         if random() < Params.prob_change_vel:
-            self.velocity = Params.V2(uniform(-2, 2), uniform(-2, 2))
-        # If too close to the window walls or CubeSat, reverse direction
-        if (self.position.x == 50 or self.position.x == Params.window_width - 50) and \
-                (self.position.y == 50 or self.position.y == Params.window_height - 50) or \
-                Params.distance(self.position, Params.sim.cubesat.position) < 70:
+            velocity_change = Params.V2(choice((-1, 1))*Params.target_vel_change,
+                                        choice((-1, 1))*Params.target_vel_change)
+            self.velocity += velocity_change
+            Params.limit_velocity(self.velocity, Params.target_max_velocity)
+
+        # If too far away from CubeSat, reverse direction
+        if Params.distance(self.position, Params.sim.cubesat.position) > Params.window_width * 0.7:
             self.velocity *= -1
 
         # Ensure that the target is moving at a reasonable speed.
@@ -187,13 +236,19 @@ class Satellite:
         self.update_target_velocity() if correction is None else self.update_cubesat_velocity(correction)
 
     def update_position(self):
-        self.position += self.velocity
-        Params.stay_in_screen(self.position)
+        if Params.recentering or Params.recenter_mode and Params.at_edge_of_screen(self.position):
+            Params.recentering = True
+            Params.recenter_all()
+        else:
+            self.position += self.velocity
+            # Params.stay_in_screen(self.position)
 
 
 class Sim:
 
     def __init__(self):
+        Params.screen_center = Params.V2(Params.window_width, Params.window_height) / 2
+
         # Make this Sim object itself available in the Params class. The two
         # satellites use it to retrieve information about each other.
         Params.sim = self
@@ -205,7 +260,7 @@ class Sim:
         self.clock = pygame.time.Clock()
 
         # Use a square with an arrow for CubeSat
-        self.cubesat = Satellite(image="CubeSat.png")
+        self.cubesat = Satellite(image="CubeSat.png", degraded=False)
         # Use an ArUco marker for the target
         self.target = Satellite(image="ArUcoTarget.png")
 
@@ -223,6 +278,10 @@ class Sim:
         put the two objects in the surface. Then make it visible.
         """
         self.screen.fill((0, 0, 0))
+        if Params.recentering:
+            font = pygame.font.Font(None, 36)
+            text = font.render("Recentering", 1, (150, 250, 250))
+            self.screen.blit(text, Params.V2(50, 50))
         self.add_obj_to_screen(self.target)
         self.add_obj_to_screen(self.cubesat)
         pygame.display.flip()
