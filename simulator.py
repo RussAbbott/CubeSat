@@ -142,18 +142,19 @@ class Satellite:
         return self.ticks > 0
 
     def allow_velocity_correction(self):
-        return self.ticks != 0
+        return 0 < self.ticks < 6
 
     def cubesat_angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
 
+        self.velocity = Params.V2(0, 0)
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
         correction = Params.normalize_angle(rel_angle - self.angle)
         # If we are pointing to the target, switch to directional mode (ticks = 1).
         if abs(correction) < 1 and self.ticks == 0:
-            self.velocity = Params.V2(0, 0)
+            # self.velocity = Params.V2(0, 0)
             self.ticks = 1
         return correction
 
@@ -188,8 +189,6 @@ class Satellite:
         occur during the current frame, it will continue (possibly
         adjusted) in the next frame.
         """
-        self.ticks = (self.ticks + 1) % Params.directional_ticks_limit
-
         self.velocity += correction
         Params.limit_velocity(self.velocity, Params.cubesat_max_velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
@@ -297,6 +296,8 @@ class Sim:
             if not self.cubesat.degraded or self.cubesat.allow_velocity_correction():
                 cubesat_velocity_correction = self.cubesat.cubesat_velocity_correction()
                 self.cubesat.update_velocity(cubesat_velocity_correction)
+            if self.cubesat.ticks > 0:
+                self.cubesat.ticks = (self.cubesat.ticks + 1) % Params.directional_ticks_limit
             if not self.cubesat.degraded or self.cubesat.allow_posiion_change():
                 self.cubesat.update_position()
 
