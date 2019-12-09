@@ -39,6 +39,8 @@ class Params:
     recentering = False
     centered_enough = 50
 
+    v2_zero = None
+
     @staticmethod
     def roundV2(v2: Vector2, prec=2):
         return Params.V2(round(v2.x, prec), round(v2.y, prec))
@@ -46,7 +48,7 @@ class Params:
     @staticmethod
     def V2(x, y):
         # noinspection PyArgumentList
-        return Vector2(x, y)
+        return Vector2(float(x), float(y))
 
     # ==================================================================================
     # Satellite params and static methods
@@ -80,10 +82,10 @@ class Params:
 
     @staticmethod
     def limit_velocity(v2, max_velocity):
-        if abs(v2.x) > max_velocity:
-            v2.x = copysign(max_velocity, v2.x)
-        if abs(v2.y) > max_velocity:
-            v2.y = copysign(max_velocity, v2.y)
+        max_xy = max(abs(v2.x), abs(v2.y))
+        if max_xy < max_velocity:
+            return v2
+        v2 *= max_velocity/max_xy
         return v2
 
     @staticmethod
@@ -146,15 +148,14 @@ class Satellite:
 
     def cubesat_angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
-
-        self.velocity = Params.V2(0, 0)
+        if self.degraded:
+            self.velocity = Params.v2_zero
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
         correction = Params.normalize_angle(rel_angle - self.angle)
         # If we are pointing to the target, switch to directional mode (ticks = 1).
-        if abs(correction) < 1 and self.ticks == 0:
-            # self.velocity = Params.V2(0, 0)
+        if self.degraded and abs(correction) < 1 and self.ticks == 0:
             self.ticks = 1
         return correction
 
@@ -240,7 +241,9 @@ class Satellite:
 class Sim:
 
     def __init__(self):
+        # Must do these after defining Params
         Params.screen_center = Params.V2(Params.window_width, Params.window_height) / 2
+        Params.v2_zero = Params.V2(0, 0)
 
         # Make this Sim object itself available in the Params class. The two
         # satellites use it to retrieve information about each other.
@@ -253,7 +256,7 @@ class Sim:
         self.clock = pygame.time.Clock()
 
         # Use a square with an arrow for CubeSat
-        self.cubesat = Satellite(image="CubeSat.png", degraded=True)
+        self.cubesat = Satellite(image="CubeSat.png")  # , degraded=True)
         # Use an ArUco marker for the target
         self.target = Satellite(image="ArUcoTarget.png")
 
