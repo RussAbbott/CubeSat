@@ -290,7 +290,7 @@ class Sim:
 
             # CubeSat does not have a rotational velocity. It is always at a fixed angle,
             # which changes frame-by-frame.
-            if not self.cubesat.degraded or self.cubesat.allow_angle_correction():
+            if not Params.recentering and (not self.cubesat.degraded or self.cubesat.allow_angle_correction()):
                 cubesat_angle_correction = self.cubesat.cubesat_angle_correction()
                 self.cubesat.update_cubesat_angle(cubesat_angle_correction)
 
