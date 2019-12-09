@@ -138,14 +138,14 @@ class Satellite:
     def allow_angle_correction(self):
         return self.ticks == 0
 
+    def allow_posiion_change(self):
+        return self.ticks > 0
+
     def allow_velocity_correction(self):
         return self.ticks != 0
 
     def cubesat_angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
-
-        # if not self.allow_angle_correction():
-        #     return 0
 
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
@@ -159,8 +159,6 @@ class Satellite:
 
     def cubesat_velocity_correction(self):
         """ Compute CubeSat velocity correction for the current frame update. """
-        # self.ticks = (self.ticks + 1) % Params.directional_ticks_limit
-
         target_position = Params.sim.target.position
         desired_direction = target_position - self.position
         correction = desired_direction - self.velocity
@@ -299,7 +297,7 @@ class Sim:
             if not self.cubesat.degraded or self.cubesat.allow_velocity_correction():
                 cubesat_velocity_correction = self.cubesat.cubesat_velocity_correction()
                 self.cubesat.update_velocity(cubesat_velocity_correction)
-            if not self.cubesat.degraded or self.cubesat.ticks > 0:
+            if not self.cubesat.degraded or self.cubesat.allow_posiion_change():
                 self.cubesat.update_position()
 
             self.target.update_velocity(None)
