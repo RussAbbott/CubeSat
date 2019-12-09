@@ -63,7 +63,7 @@ class Params:
     # Target
     target_max_velocity = 1.9   # pixels / frame
     target_min_velocity = 0.75  # pixels / frame
-    target_vel_change = 0.5
+    target_vel_change = 1
 
     # Probability of changing velocity each frame.
     # About once every second and a half.
@@ -121,7 +121,7 @@ class Params:
 
 class Satellite:
 
-    def __init__(self, pos=None, vel=None, angle=None, image=None, degraded=True):
+    def __init__(self, pos=None, vel=None, angle=None, image=None, degraded=False):
 
         # pos, vel, and angle are with respect to the fixed window/plane
         self.position = pos if pos is not None else \
@@ -135,33 +135,31 @@ class Satellite:
         self.degraded = degraded
         self.ticks = 0
 
+    def allow_angle_correction(self):
+        return self.ticks == 0
+
+    def allow_velocity_correction(self):
+        return self.ticks != 0
+
     def cubesat_angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
 
-        if not self.in_rotation_mode():
-            return 0
+        # if not self.allow_angle_correction():
+        #     return 0
 
-        # Update the angle if degraded or if in the rotation phase (ticks == 0) of non-degraded
-        self.velocity = Params.V2(0, 0)
         target_position = Params.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
         correction = Params.normalize_angle(rel_angle - self.angle)
         # If we are pointing to the target, switch to directional mode (ticks = 1).
-        if abs(correction) < 1:
+        if abs(correction) < 1 and self.ticks == 0:
+            self.velocity = Params.V2(0, 0)
             self.ticks = 1
         return correction
 
     def cubesat_velocity_correction(self):
         """ Compute CubeSat velocity correction for the current frame update. """
-        if self.in_rotation_mode():
-            self.velocity = Params.V2(0, 0)
-            return Params.V2(0, 0)
-
-        self.ticks = (self.ticks + 1) % Params.directional_ticks_limit
-
-        if self.degraded and self.ticks > 10:
-            return Params.V2(0, 0)
+        # self.ticks = (self.ticks + 1) % Params.directional_ticks_limit
 
         target_position = Params.sim.target.position
         desired_direction = target_position - self.position
@@ -172,9 +170,6 @@ class Satellite:
         move_toward_target = 1 - repulsive_force
         correction = move_toward_target * correction
         return correction
-
-    def in_rotation_mode(self):
-        return not self.degraded or self.ticks == 0
 
     def update_cubesat_angle(self, correction):
         """
@@ -195,6 +190,8 @@ class Satellite:
         occur during the current frame, it will continue (possibly
         adjusted) in the next frame.
         """
+        self.ticks = (self.ticks + 1) % Params.directional_ticks_limit
+
         self.velocity += correction
         Params.limit_velocity(self.velocity, Params.cubesat_max_velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
@@ -241,7 +238,6 @@ class Satellite:
             Params.recenter_all()
         else:
             self.position += self.velocity
-            # Params.stay_in_screen(self.position)
 
 
 class Sim:
@@ -260,7 +256,7 @@ class Sim:
         self.clock = pygame.time.Clock()
 
         # Use a square with an arrow for CubeSat
-        self.cubesat = Satellite(image="CubeSat.png", degraded=False)
+        self.cubesat = Satellite(image="CubeSat.png", degraded=True)
         # Use an ArUco marker for the target
         self.target = Satellite(image="ArUcoTarget.png")
 
@@ -294,14 +290,17 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            cubesat_velocity_correction = self.cubesat.cubesat_velocity_correction()
-            self.cubesat.update_velocity(cubesat_velocity_correction)
-            self.cubesat.update_position()
-
             # CubeSat does not have a rotational velocity. It is always at a fixed angle,
             # which changes frame-by-frame.
-            cubesat_angle_correction = self.cubesat.cubesat_angle_correction()
-            self.cubesat.update_cubesat_angle(cubesat_angle_correction)
+            if not self.cubesat.degraded or self.cubesat.allow_angle_correction():
+                cubesat_angle_correction = self.cubesat.cubesat_angle_correction()
+                self.cubesat.update_cubesat_angle(cubesat_angle_correction)
+
+            if not self.cubesat.degraded or self.cubesat.allow_velocity_correction():
+                cubesat_velocity_correction = self.cubesat.cubesat_velocity_correction()
+                self.cubesat.update_velocity(cubesat_velocity_correction)
+            if not self.cubesat.degraded or self.cubesat.ticks > 0:
+                self.cubesat.update_position()
 
             self.target.update_velocity(None)
             self.target.update_position()
