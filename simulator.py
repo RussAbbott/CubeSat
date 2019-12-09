@@ -256,7 +256,7 @@ class Sim:
         self.clock = pygame.time.Clock()
 
         # Use a square with an arrow for CubeSat
-        self.cubesat = Satellite(image="CubeSat.png")  # , degraded=True)
+        self.cubesat = Satellite(image="CubeSat.png", degraded=True)
         # Use an ArUco marker for the target
         self.target = Satellite(image="ArUcoTarget.png")
 
