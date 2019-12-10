@@ -322,10 +322,9 @@ class Sim:
         return Sim.V2(round(v2.x, prec), round(v2.y, prec))
 
     # noinspection PyAttributeOutsideInit
-    def run(self):
+    def run(self, impaired):
         """ Create CubeSat and the target and run the main loop. """
-        self.cubesat = CubeSat()
-        # self.cubesat = ImpairedCubeSat()
+        self.cubesat = CubeSat() if not impaired else ImpairedCubeSat()
         self.target = Target()
 
         while not self.exit:
@@ -365,4 +364,4 @@ class Sim:
 
 
 if __name__ == '__main__':
-    Sim().run()
+    Sim().run(impaired=True)
