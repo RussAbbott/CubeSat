@@ -13,3 +13,5 @@ Consists of the following classes.
 
 * __class__ Sim. The simulation infrastructure.
 
+
+To run the code, you must first install Pygame. Everything else is standard Python.
