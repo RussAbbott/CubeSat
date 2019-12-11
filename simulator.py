@@ -19,6 +19,8 @@ class Satellite:
     # CubeSat and the target
     sim = None
 
+    max_angle_change = 1  # degrees/frame
+
     def __init__(self, pos=None, vel=None, angle=None, image=None):
         
         # pos, vel, and angle are with respect to the fixed window/plane
@@ -54,8 +56,8 @@ class Satellite:
         does not occur during the current frame, it will continue
         (possibly adjusted) in the next frame.
         """
-        if abs(correction) > CubeSat.cubesat_max_angle_change:
-            correction = copysign(CubeSat.cubesat_max_angle_change, correction)
+        if abs(correction) > Satellite.max_angle_change:
+            correction = copysign(Satellite.max_angle_change, correction)
         new_angle = Satellite.normalize_angle(self.angle + correction)
         self.angle = new_angle
 
@@ -74,8 +76,8 @@ class Satellite:
 class CubeSat(Satellite):
 
     # pygame uses degrees rather than radians
-    cubesat_max_angle_change = 0.5  # degrees/frame
-    cubesat_max_velocity = 1.0  # pixels / frame
+    # cubesat_max_angle_change = 0.5  # degrees/frame
+    max_velocity = 1.0  # pixels / frame
 
     def __init__(self, pos=None, vel=None, angle=None, image='CubeSat.png'):
         super().__init__(pos, vel, angle, image)
@@ -127,7 +129,7 @@ class CubeSat(Satellite):
         the target.
         """
         self.velocity += correction
-        Satellite.limit_velocity(self.velocity, CubeSat.cubesat_max_velocity)
+        Satellite.limit_velocity(self.velocity, CubeSat.max_velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
         dist_to_target = Sim.distance(self.position, Satellite.sim.target.position)
         # noinspection PyTypeChecker
@@ -198,10 +200,10 @@ class Target(Satellite):
     # Probability of changing velocity on any frame.
     prob_velocity_change = 0.05  
     
-    target_velocity_change = 2  # pixels / frame
+    velocity_change = 2  # pixels / frame
 
-    target_max_velocity = 1.9   # pixels / frame
-    target_min_velocity = 0.75  # pixels / frame
+    max_velocity = 1.9   # pixels / frame
+    min_velocity = 0.75  # pixels / frame
 
     def __init__(self, pos=None, vel=None, image='ArUco_64_1.png'):
         super().__init__(pos, vel, image=image)
@@ -217,10 +219,10 @@ class Target(Satellite):
         """
         # Change direction every once in a while
         if random() < Target.prob_velocity_change:
-            velocity_change = Sim.V2(choice((-0.5, 0.5))*Target.target_velocity_change,
-                                        choice((-0.5, 0.5))*Target.target_velocity_change)
+            velocity_change = Sim.V2(choice((-0.5, 0.5))*Target.velocity_change,
+                                        choice((-0.5, 0.5))*Target.velocity_change)
             self.velocity += velocity_change
-            Satellite.limit_velocity(self.velocity, Target.target_max_velocity)
+            Satellite.limit_velocity(self.velocity, Target.max_velocity)
 
         # If too far away from CubeSat, reverse direction
         if Sim.distance(self.position, Satellite.sim.cubesat.position) > Sim.window_width * 0.7:
@@ -229,13 +231,13 @@ class Target(Satellite):
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat.
         # The actual numbers are arbitrary.
-        if abs(self.velocity.x) < Target.target_min_velocity:
+        if abs(self.velocity.x) < Target.min_velocity:
             self.velocity.x *= 2
-        if abs(self.velocity.x) > Target.target_max_velocity:
+        if abs(self.velocity.x) > Target.max_velocity:
             self.velocity.x *= 0.7
-        if abs(self.velocity.y) < Target.target_min_velocity:
+        if abs(self.velocity.y) < Target.min_velocity:
             self.velocity.y *= 2
-        if abs(self.velocity.y) > Target.target_max_velocity:
+        if abs(self.velocity.y) > Target.max_velocity:
             self.velocity.y *= 0.7
 
 
@@ -296,7 +298,7 @@ class Sim:
         if correction.magnitude() < 5:
             Sim.recentering = False
             return
-        max_speed = 2.5*min(CubeSat.cubesat_max_velocity, Target.target_max_velocity)
+        max_speed = 2.5*min(CubeSat.max_velocity, Target.max_velocity)
         while abs(correction.x) > max_speed or abs(correction.y) > max_speed:
             correction *= 0.9
         pos1 += correction
