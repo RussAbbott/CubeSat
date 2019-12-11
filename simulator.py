@@ -198,7 +198,7 @@ class Target(Satellite):
     # Probability of changing velocity on any frame.
     prob_velocity_change = 0.05  
     
-    target_velocity_change = 1  # pixels / frame
+    target_velocity_change = 2  # pixels / frame
 
     target_max_velocity = 1.9   # pixels / frame
     target_min_velocity = 0.75  # pixels / frame
@@ -217,8 +217,8 @@ class Target(Satellite):
         """
         # Change direction every once in a while
         if random() < Target.prob_velocity_change:
-            velocity_change = Sim.V2(choice((-0.3, 0.3))*Target.target_velocity_change,
-                                        choice((-0.3, 0.3))*Target.target_velocity_change)
+            velocity_change = Sim.V2(choice((-0.5, 0.5))*Target.target_velocity_change,
+                                        choice((-0.5, 0.5))*Target.target_velocity_change)
             self.velocity += velocity_change
             Satellite.limit_velocity(self.velocity, Target.target_max_velocity)
 
