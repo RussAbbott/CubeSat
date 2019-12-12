@@ -1,7 +1,7 @@
 
 from math import atan2, copysign, pi, sqrt
 from os import path
-from random import choice, random, uniform
+from random import random, uniform
 
 import pygame
 from pygame.math import Vector2
@@ -14,10 +14,6 @@ Sim: The simulation infrastructure
 
 
 class Satellite:
-
-    # The simulation object itself is available here. It includes references to both
-    # CubeSat and the target
-    sim = None
 
     max_angle_change = 1  # degrees/frame
 
@@ -66,7 +62,7 @@ class Satellite:
         pass
 
     def update_position(self):
-        if Sim.recentering or Sim.recenter_mode and Sim.at_edge_of_screen(self.position):
+        if Sim.recentering or Sim.recenter_mode and Sim.at_edge_of_screen(self):
             Sim.recentering = True
             Sim.recenter_all()
         else:
@@ -84,9 +80,7 @@ class CubeSat(Satellite):
 
     def angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
-        # if self.impaired:
-        #     self.velocity = Sim.v2_zero()
-        target_position = Satellite.sim.target.position
+        target_position = Sim.sim.target.position
         (rel_x, rel_y) = (target_position.x - self.position.x, target_position.y - self.position.y)
         rel_angle = (180 / pi) * (-atan2(rel_y, rel_x))
         correction = Satellite.normalize_angle(rel_angle - self.angle)
@@ -118,7 +112,7 @@ class CubeSat(Satellite):
 
         velocity_correction = self.velocity_correction( )
         self.update_velocity(velocity_correction)
-        self.update_position( )
+        self.update_position()
 
     def update_velocity(self, correction):
         """
@@ -131,14 +125,14 @@ class CubeSat(Satellite):
         self.velocity += correction
         Satellite.limit_velocity(self.velocity, CubeSat.max_velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
-        dist_to_target = Sim.distance(self.position, Satellite.sim.target.position)
+        dist_to_target = Sim.distance(self.position, Sim.sim.target.position)
         # noinspection PyTypeChecker
         velocity_multiplier = max(1, (125/max(dist_to_target, 50))**2)
         self.velocity *= velocity_multiplier
 
     def velocity_correction(self):
         """ Compute CubeSat velocity correction for the current frame update. """
-        target_position = Satellite.sim.target.position
+        target_position = Sim.sim.target.position
         desired_direction = target_position - self.position
         correction = desired_direction - self.velocity
 
@@ -152,9 +146,9 @@ class CubeSat(Satellite):
 class ImpairedCubeSat(CubeSat):
 
     # For when in impaired mode
-    directional_ticks_limit = 50
+    directional_ticks_limit = 20
 
-    def __init__(self, pos=None, vel=None, angle=None, image='CubeSat.png'):
+    def __init__(self, pos=None, vel=None, angle=None, image='CubeSatImpaired.png'):
         self.ticks = 0
         super().__init__(pos, vel, angle, image)
 
@@ -200,7 +194,7 @@ class Target(Satellite):
     # Probability of changing velocity on any frame.
     prob_velocity_change = 0.05  
     
-    velocity_change = 2  # pixels / frame
+    velocity_change = 1.0  # pixels / frame
 
     max_velocity = 1.9   # pixels / frame
     min_velocity = 0.75  # pixels / frame
@@ -219,14 +213,15 @@ class Target(Satellite):
         """
         # Change direction every once in a while
         if random() < Target.prob_velocity_change:
-            velocity_change = Sim.V2(choice((-0.5, 0.5))*Target.velocity_change,
-                                        choice((-0.5, 0.5))*Target.velocity_change)
+            velocity_change = Sim.V2(uniform((-1)*Target.velocity_change, Target.velocity_change),
+                                     uniform((-1)*Target.velocity_change, Target.velocity_change))
             self.velocity += velocity_change
             Satellite.limit_velocity(self.velocity, Target.max_velocity)
 
-        # If too far away from CubeSat, reverse direction
-        if Sim.distance(self.position, Satellite.sim.cubesat.position) > Sim.window_width * 0.7:
-            self.velocity *= -1
+        # If too far away from any CubeSat, reverse direction
+        if max([Sim.distance(self.position, cubesat.position) for cubesat in Sim.sim.cubesats]) > \
+            Sim.window_width * 0.6:
+            self.velocity *= -0.01  # uniform(-0.2, -0.2)
 
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat.
@@ -260,11 +255,15 @@ class Sim:
     # How close (in pixels) recentering must get to satisfy recentering.
     centered_enough = 50
 
+    # The simulation object itself is available here. It includes references to both
+    # CubeSat and the target
+    sim = None
+
     def __init__(self):
         # Make this Sim object itself available in the Params class.
         # The satellites use it to retrieve information about each other.
         # (That's a cheat.)
-        Satellite.sim = self
+        Sim.sim = self
         
         pygame.init()
         pygame.display.set_caption("CubeSat Simulator")
@@ -273,6 +272,9 @@ class Sim:
         self.clock = pygame.time.Clock()
         self.exit = False
 
+        self.target = None
+        self.cubesats = None
+
     def add_obj_to_screen(self, obj):
         """ Update the screen "surface" before displaying it. """
         obj_display = pygame.transform.rotate(obj.image, obj.angle)
@@ -280,8 +282,8 @@ class Sim:
         self.screen.blit(obj_display, obj.position - (rect.width/2, rect.height/2))
 
     @staticmethod
-    def at_edge_of_screen(position):
-        return not (50 < position.x < Sim.window_width-50) or not (50 < position.y < Sim.window_height-50)
+    def at_edge_of_screen(sat):
+        return not (50 < sat.position.x < Sim.window_width-50) or not (50 < sat.position.y < Sim.window_height-50)
 
     @staticmethod
     def distance(a, b):
@@ -292,17 +294,21 @@ class Sim:
         """
         Take one step (frame) in the recentering process.
         """
-        (pos1, pos2) = (Satellite.sim.cubesat.position, Satellite.sim.target.position)
-        center_point = (pos1 + pos2) / 2
+        sum_positions = Sim.v2_zero()
+        sum_positions += Sim.sim.target.position
+        for cubesat in Sim.sim.cubesats:
+            sum_positions += cubesat.position
+        center_point = sum_positions/(1+len(Sim.sim.cubesats))
         correction = Sim.screen_center() - center_point
-        if correction.magnitude() < 5:
+        if max([abs(correction.x), abs(correction.y)]) < 5:
             Sim.recentering = False
             return
         max_speed = 2.5*min(CubeSat.max_velocity, Target.max_velocity)
-        while abs(correction.x) > max_speed or abs(correction.y) > max_speed:
-            correction *= 0.9
-        pos1 += correction
-        pos2 += correction
+        max_dir_speed = max([abs(correction.x), abs(correction.y)])
+        correction *= max_speed/max_dir_speed
+        positions = [Sim.sim.target.position] + [cubesat.position for cubesat in Sim.sim.cubesats]
+        for pos in positions:
+            pos += correction
 
     def refresh_screen(self):
         """
@@ -315,7 +321,8 @@ class Sim:
             text = font.render("Recentering", 1, (150, 250, 250))
             self.screen.blit(text, Sim.V2(50, 50))
         # Put the target in front of cubesat.
-        self.add_obj_to_screen(self.cubesat)
+        for cubesat in self.cubesats:
+            self.add_obj_to_screen(cubesat)
         self.add_obj_to_screen(self.target)
         pygame.display.flip()
 
@@ -324,9 +331,9 @@ class Sim:
         return Sim.V2(round(v2.x, prec), round(v2.y, prec))
 
     # noinspection PyAttributeOutsideInit
-    def run(self, impaired=None):
+    def run(self, cubesats):
         """ Create CubeSat and the target and run the main loop. """
-        self.cubesat = CubeSat() if not impaired else ImpairedCubeSat()
+        self.cubesats = cubesats
         self.target = Target()
 
         while not self.exit:
@@ -335,7 +342,8 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            self.cubesat.update()
+            for cubesat in self.cubesats:
+                cubesat.update()
             self.target.update()
 
             self.refresh_screen()
@@ -366,4 +374,4 @@ class Sim:
 
 
 if __name__ == '__main__':
-    Sim().run(impaired=True)
+    Sim().run([ImpairedCubeSat(), CubeSat()])
