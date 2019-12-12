@@ -126,8 +126,7 @@ class CubeSat(Satellite):
         Satellite.limit_velocity(self.velocity, CubeSat.max_velocity)
         # If we are too close to the target, backpedal faster. (Very ad hoc.)
         dist_to_target = Sim.distance(self.position, Sim.sim.target.position)
-        # noinspection PyTypeChecker
-        velocity_multiplier = max(1, (125/max(dist_to_target, 50))**2)
+        velocity_multiplier = max(1.0, (125/max(dist_to_target, 50))**2)
         self.velocity *= velocity_multiplier
 
     def velocity_correction(self):
@@ -145,7 +144,6 @@ class CubeSat(Satellite):
 
 class ImpairedCubeSat(CubeSat):
 
-    # For when in impaired mode
     directional_ticks_limit = 20
 
     def __init__(self, pos=None, vel=None, angle=None, image='CubeSatImpaired.png'):
@@ -245,7 +243,7 @@ class Sim:
     window_width = 800   # pixels
     window_height = 800  # pixels
 
-    # recenter_mode:    False: the objects are unable to penetrate the window borders
+    # recenter_mode:    False: the objects are unable to penetrate the window borders. (Not currently working.)
     #                   True: the object are recentered in the window when they approach a window border
     recenter_mode = True
 
@@ -260,7 +258,7 @@ class Sim:
     sim = None
 
     def __init__(self):
-        # Make this Sim object itself available in the Params class.
+        # Make this Sim object itself available in the Sim class.
         # The satellites use it to retrieve information about each other.
         # (That's a cheat.)
         Sim.sim = self
@@ -272,8 +270,9 @@ class Sim:
         self.clock = pygame.time.Clock()
         self.exit = False
 
-        self.target = None
         self.cubesats = None
+        self.stats = None
+        self.target = None
 
     def add_obj_to_screen(self, obj):
         """ Update the screen "surface" before displaying it. """
@@ -295,9 +294,8 @@ class Sim:
         Take one step (frame) in the recentering process.
         """
         sum_positions = Sim.v2_zero()
-        sum_positions += Sim.sim.target.position
-        for cubesat in Sim.sim.cubesats:
-            sum_positions += cubesat.position
+        for sat in Sim.sim.sats:
+            sum_positions += sat.position
         center_point = sum_positions/(1+len(Sim.sim.cubesats))
         correction = Sim.screen_center() - center_point
         if max([abs(correction.x), abs(correction.y)]) < 5:
@@ -306,9 +304,8 @@ class Sim:
         max_speed = 2.5*min(CubeSat.max_velocity, Target.max_velocity)
         max_dir_speed = max([abs(correction.x), abs(correction.y)])
         correction *= max_speed/max_dir_speed
-        positions = [Sim.sim.target.position] + [cubesat.position for cubesat in Sim.sim.cubesats]
-        for pos in positions:
-            pos += correction
+        for sat in Sim.sim.sats:
+            sat.position += correction
 
     def refresh_screen(self):
         """
@@ -320,10 +317,8 @@ class Sim:
             font = pygame.font.Font(None, 36)
             text = font.render("Recentering", 1, (150, 250, 250))
             self.screen.blit(text, Sim.V2(50, 50))
-        # Put the target in front of cubesat.
-        for cubesat in self.cubesats:
-            self.add_obj_to_screen(cubesat)
-        self.add_obj_to_screen(self.target)
+        for sat in self.sats:
+            self.add_obj_to_screen(sat)
         pygame.display.flip()
 
     @staticmethod
@@ -335,6 +330,8 @@ class Sim:
         """ Create CubeSat and the target and run the main loop. """
         self.cubesats = cubesats
         self.target = Target()
+        # Puts the satellites in front of the target
+        self.sats = [self.target] + self.cubesats
 
         while not self.exit:
             # Event queue.  Not used here, but standard in pygame applications.
@@ -342,9 +339,8 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            for cubesat in self.cubesats:
-                cubesat.update()
-            self.target.update()
+            for sat in self.sats:
+                sat.update()
 
             self.refresh_screen()
             self.clock.tick(Sim.FPS)
@@ -374,4 +370,5 @@ class Sim:
 
 
 if __name__ == '__main__':
+    # Puts the unimpaired CubeSat in front of the Impaired CubeSate
     Sim().run([ImpairedCubeSat(), CubeSat()])
