@@ -87,18 +87,27 @@ class CubeSat(Satellite):
         return correction
 
     @staticmethod
-    def target_repulsive_force(self_position, target_position):
+    def repulsive_force(self_position, other_position):
         """
-        Compute a virtual repulsive force from the target so that CubeSat
+        Compute a virtual repulsive force from the other satellite so that CubeSat
         maintains a reasonable distance. The force decreases with the fourth
         power of the distance between them. The actual numbers are arbitrary.
         Doing it this way makes the relationship between the two smoother and
         more fluid. An alternative might have been to keep CubeSat a fixed
         distance away from the target.
         """
-        dist_to_target = Sim.distance(self_position, target_position)
-        repulsive_force = 1E9/dist_to_target**4
+        dist_to_target = Sim.distance(self_position, other_position)
+        # Don't divide by 0 if self_position == other_position (or if very close)
+        repulsive_force = 4E9/max(1, dist_to_target**4)
         return repulsive_force
+
+    def stay_away_from_other_sats(self):
+        repulsive_aggregate = Sim.v2_zero()
+        for sat in Sim.sim.sats:
+            # if self is not sat:
+                direction = self.position - sat.position
+                repulsive_aggregate += direction * self.repulsive_force(self.position, sat.position)
+        return repulsive_aggregate
 
     def update(self):
         """
@@ -134,11 +143,7 @@ class CubeSat(Satellite):
         target_position = Sim.sim.target.position
         desired_direction = target_position - self.position
         correction = desired_direction - self.velocity
-
-        # To maintain a distance, act as if there is a repulsive force from target.
-        repulsive_force = CubeSat.target_repulsive_force(self.position, target_position)
-        move_toward_target = 1 - repulsive_force
-        correction = move_toward_target * correction
+        correction += self.stay_away_from_other_sats()
         return correction
 
 
@@ -330,7 +335,7 @@ class Sim:
         """ Create CubeSat and the target and run the main loop. """
         self.cubesats = cubesats
         self.target = Target()
-        # Puts the satellites in front of the target
+        # Displays the satellites in front of the target
         self.sats = [self.target] + self.cubesats
 
         while not self.exit:
@@ -370,5 +375,5 @@ class Sim:
 
 
 if __name__ == '__main__':
-    # Puts the unimpaired CubeSat in front of the Impaired CubeSate
-    Sim().run([ImpairedCubeSat(), CubeSat()])
+    # Displays the unimpaired CubeSat in front of the impaired CubeSate
+    Sim().run([ImpairedCubeSat(), CubeSat(), CubeSat()])
