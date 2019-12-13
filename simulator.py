@@ -98,15 +98,14 @@ class CubeSat(Satellite):
         """
         dist_to_target = Sim.distance(self_position, other_position)
         # Don't divide by 0 if self_position == other_position (or if very close)
-        repulsive_force = 4E9/max(1, dist_to_target**4)
+        repulsive_force = 4E9/max(1.0, dist_to_target**4)
         return repulsive_force
 
     def stay_away_from_other_sats(self):
         repulsive_aggregate = Sim.v2_zero()
         for sat in Sim.sim.sats:
-            # if self is not sat:
-                direction = self.position - sat.position
-                repulsive_aggregate += direction * self.repulsive_force(self.position, sat.position)
+            direction = self.position - sat.position
+            repulsive_aggregate += direction * self.repulsive_force(self.position, sat.position)
         return repulsive_aggregate
 
     def update(self):
@@ -202,10 +201,15 @@ class Target(Satellite):
     max_velocity = 1.9   # pixels / frame
     min_velocity = 0.75  # pixels / frame
 
-    def __init__(self, pos=None, vel=None, image='ArUco_64_1.png'):
+    def __init__(self, pos=None, vel=None, image='ArUco_64_1.png', fixed=False):
+        self.fixed = fixed
+        if fixed:
+            vel = Sim.v2_zero()
         super().__init__(pos, vel, image=image)
 
     def update(self):
+        if self.fixed:
+            return
         self.update_velocity()
         self.update_position()
 
@@ -331,10 +335,10 @@ class Sim:
         return Sim.V2(round(v2.x, prec), round(v2.y, prec))
 
     # noinspection PyAttributeOutsideInit
-    def run(self, cubesats):
+    def run(self, cubesats, target=None):
         """ Create CubeSat and the target and run the main loop. """
         self.cubesats = cubesats
-        self.target = Target()
+        self.target = target if target else Target()
         # Displays the satellites in front of the target
         self.sats = [self.target] + self.cubesats
 
@@ -376,4 +380,4 @@ class Sim:
 
 if __name__ == '__main__':
     # Displays the unimpaired CubeSat in front of the impaired CubeSate
-    Sim().run([ImpairedCubeSat(), CubeSat(), CubeSat()])
+    Sim().run([ImpairedCubeSat(), CubeSat(), CubeSat()], Target(fixed=True))
