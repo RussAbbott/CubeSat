@@ -16,6 +16,7 @@ Sim: The simulation infrastructure
 class Satellite:
 
     max_angle_change = 1  # degrees/frame
+    sat_number = 0
 
     def __init__(self, pos=None, vel=None, angle=None, image=None):
         
@@ -28,6 +29,8 @@ class Satellite:
         current_directory = path.dirname(path.abspath(__file__))
         image_path = current_directory + '/' + 'images/' + image
         self.image = pygame.image.load(image_path)
+        Satellite.sat_number += 1
+        self.id = 'Tgt' if isinstance(self, Target) else 'C-'+str(self.sat_number)
 
     @staticmethod
     def limit_velocity(v2, max_velocity):
@@ -67,6 +70,10 @@ class Satellite:
             Sim.recenter_all()
         else:
             self.position += self.velocity
+            if Sim.sim.print_ids:
+                if isinstance(self, Target):
+                    print()
+                print(f'{self.id}: {self.position}')
 
 
 class CubeSat(Satellite):
@@ -98,7 +105,9 @@ class CubeSat(Satellite):
         """
         dist_to_target = Sim.distance(self_position, other_position)
         # Don't divide by 0 if self_position == other_position (or if very close)
-        repulsive_force = 4E9/max(1.0, dist_to_target**4)
+        limited_dist_to_target = max(100, dist_to_target)
+        # Divide by 100 (or another arbitrary number) to increase repulsive force.
+        repulsive_force = 1/(limited_dist_to_target/100)**2
         return repulsive_force
 
     def stay_away_from_other_sats(self):
@@ -208,9 +217,8 @@ class Target(Satellite):
         super().__init__(pos, vel, image=image)
 
     def update(self):
-        if self.fixed:
-            return
-        self.update_velocity()
+        if not self.fixed:
+            self.update_velocity( )
         self.update_position()
 
     def update_velocity(self, _correction=None):
@@ -266,11 +274,12 @@ class Sim:
     # CubeSat and the target
     sim = None
 
-    def __init__(self):
+    def __init__(self, print_ids=False):
         # Make this Sim object itself available in the Sim class.
         # The satellites use it to retrieve information about each other.
         # (That's a cheat.)
         Sim.sim = self
+        self.print_ids = print_ids
         
         pygame.init()
         pygame.display.set_caption("CubeSat Simulator")
@@ -380,4 +389,4 @@ class Sim:
 
 if __name__ == '__main__':
     # Displays the unimpaired CubeSat in front of the impaired CubeSate
-    Sim().run([ImpairedCubeSat(), CubeSat(), CubeSat()], Target(fixed=True))
+    Sim(print_ids=False).run([ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
