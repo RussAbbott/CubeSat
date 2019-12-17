@@ -105,7 +105,7 @@ class CubeSat(Satellite):
         """
         dist_to_target = Sim.distance(self_position, other_position)
         # Don't divide by 0 if self_position == other_position (or if very close)
-        limited_dist_to_target = max(100, dist_to_target)
+        limited_dist_to_target = max(100.0, dist_to_target)
         # Divide by 100 (or another arbitrary number) to increase repulsive force.
         repulsive_force = 1/(limited_dist_to_target/100)**2
         return repulsive_force
