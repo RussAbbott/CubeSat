@@ -48,8 +48,8 @@ class Satellite:
 
     def update(self):
         """ Update CubeSat differently from the target. """
-        pass
-        # print(f'updated {self.id}')
+        if Sim.sim.print_ids:
+            print(f'updated {self.id}')
 
     def update_angle(self, correction):
         """
@@ -306,6 +306,11 @@ class Sim:
 
     @staticmethod
     def at_edge_of_screen(sat):
+        """
+        This is defined in Sim rather than in Satellite because it concerns
+        the window within which the simulation is run, not the satellite, which
+        may or may not be within the window boundaries.
+        """
         return sat.position.x < 50 or sat.position.x > Sim.window_width-50 or \
                sat.position.y < 50 or sat.position.y > Sim.window_height - 50
 
@@ -396,4 +401,4 @@ class Sim:
 
 if __name__ == '__main__':
     # Displays the unimpaired CubeSat in front of the impaired CubeSate
-    Sim(print_ids=False).run([ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
+    Sim(print_ids=False).run([CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
