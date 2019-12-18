@@ -109,8 +109,10 @@ class CubeSat(Satellite):
         # Don't divide by 0 if self_position == other_position (or if very close)
         limited_dist_to_target = max(100.0, dist_to_target)
         # Divide by 100 (or some other arbitrary number) to scale repulsive
-        # force to distance units.
-        repulsive_force = 1/(limited_dist_to_target/100)**2
+        # force to distance units. Let the Target have a stronger repulsive
+        # force than the other CubeSats.
+        divisor = 100 if isinstance(other, Target) else 50
+        repulsive_force = 1/(limited_dist_to_target/divisor)**2
         return repulsive_force
 
     def stay_away_from_other_sats(self):
@@ -401,4 +403,5 @@ class Sim:
 
 if __name__ == '__main__':
     # Displays the unimpaired CubeSat in front of the impaired CubeSate
-    Sim(print_ids=False).run([CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
+    Sim(print_ids=False).run([CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(), CubeSat()],
+                             Target(fixed=True))
