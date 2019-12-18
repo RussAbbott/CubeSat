@@ -30,7 +30,9 @@ class Satellite:
         image_path = current_directory + '/' + 'images/' + image
         self.image = pygame.image.load(image_path)
         Satellite.sat_number += 1
-        self.id = 'Tgt' if isinstance(self, Target) else 'C-'+str(self.sat_number)
+        self.id = 'Tgt' if isinstance(self, Target) else (
+                  'I-' if isinstance(self, ImpairedCubeSat) else
+                  'C-') + str(self.sat_number)
 
     @staticmethod
     def limit_velocity(v2, max_velocity):
@@ -47,6 +49,7 @@ class Satellite:
     def update(self):
         """ Update CubeSat differently from the target. """
         pass
+        # print(f'updated {self.id}')
 
     def update_angle(self, correction):
         """
@@ -93,20 +96,20 @@ class CubeSat(Satellite):
         correction = Satellite.normalize_angle(rel_angle - self.angle)
         return correction
 
-    @staticmethod
-    def repulsive_force(self_position, other_position):
+    def repulsive_force(self, other):
         """
-        Compute a virtual repulsive force from the other satellite so that CubeSat
-        maintains a reasonable distance. The force decreases with the fourth
-        power of the distance between them. The actual numbers are arbitrary.
-        Doing it this way makes the relationship between the two smoother and
-        more fluid. An alternative might have been to keep CubeSat a fixed
-        distance away from the target.
+        Compute a virtual repulsive force from the other satellite so that
+        CubeSat maintains a reasonable distance. The force decreases with
+        the square of the distance between them. The actual numbers are
+        arbitrary.  Doing it this way makes the relationship between the two
+        smoother and more fluid. An alternative might have been to keep CubeSat
+        a fixed distance away from the target.
         """
-        dist_to_target = Sim.distance(self_position, other_position)
+        dist_to_target = Sim.distance(self.position, other.position)
         # Don't divide by 0 if self_position == other_position (or if very close)
         limited_dist_to_target = max(100.0, dist_to_target)
-        # Divide by 100 (or another arbitrary number) to increase repulsive force.
+        # Divide by 100 (or some other arbitrary number) to scale repulsive
+        # force to distance units.
         repulsive_force = 1/(limited_dist_to_target/100)**2
         return repulsive_force
 
@@ -114,7 +117,7 @@ class CubeSat(Satellite):
         repulsive_aggregate = Sim.v2_zero()
         for sat in Sim.sim.sats:
             direction = self.position - sat.position
-            repulsive_aggregate += direction * self.repulsive_force(self.position, sat.position)
+            repulsive_aggregate += direction * self.repulsive_force(sat)
         return repulsive_aggregate
 
     def update(self):
@@ -130,6 +133,7 @@ class CubeSat(Satellite):
         velocity_correction = self.velocity_correction( )
         self.update_velocity(velocity_correction)
         self.update_position()
+        super().update()
 
     def update_velocity(self, correction):
         """
@@ -198,6 +202,7 @@ class ImpairedCubeSat(CubeSat):
             self.ticks = (self.ticks + 1) % ImpairedCubeSat.directional_ticks_limit
         if self.allow_position_change():
             self.update_position()
+        super().update()
 
 
 class Target(Satellite):
@@ -220,6 +225,7 @@ class Target(Satellite):
         if not self.fixed:
             self.update_velocity( )
         self.update_position()
+        super().update()
 
     def update_velocity(self, _correction=None):
         """
@@ -300,7 +306,8 @@ class Sim:
 
     @staticmethod
     def at_edge_of_screen(sat):
-        return not (50 < sat.position.x < Sim.window_width-50) or not (50 < sat.position.y < Sim.window_height-50)
+        return sat.position.x < 50 or sat.position.x > Sim.window_width-50 or \
+               sat.position.y < 50 or sat.position.y > Sim.window_height - 50
 
     @staticmethod
     def distance(a, b):
