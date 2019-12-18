@@ -36,10 +36,9 @@ class Satellite:
 
     @staticmethod
     def limit_velocity(v2, max_velocity):
-        max_xy = max(abs(v2.x), abs(v2.y))
-        if max_xy < max_velocity:
-            return v2
-        v2 *= max_velocity/max_xy
+        magnitude = v2.magnitude()
+        if magnitude > max_velocity:
+            v2 *= max_velocity/magnitude
         return v2
 
     @staticmethod
@@ -48,8 +47,7 @@ class Satellite:
 
     def update(self):
         """ Update CubeSat differently from the target. """
-        if Sim.sim.print_ids:
-            print(f'updated {self.id}')
+        pass
 
     def update_angle(self, correction):
         """
@@ -68,15 +66,11 @@ class Satellite:
         pass
 
     def update_position(self):
-        if Sim.recentering or Sim.recenter_mode and Sim.at_edge_of_screen(self):
-            Sim.recentering = True
-            Sim.recenter_all()
-        else:
-            self.position += self.velocity
-            if Sim.sim.print_ids:
-                if isinstance(self, Target):
-                    print()
-                print(f'{self.id}: {self.position}')
+        self.position += self.velocity
+        if Sim.sim.print_ids:
+            if isinstance(self, Target):
+                print()
+            print(f'{self.id}: {Sim.roundV2(self.position)}; ', end='')
 
 
 class CubeSat(Satellite):
@@ -105,18 +99,20 @@ class CubeSat(Satellite):
         smoother and more fluid. An alternative might have been to keep CubeSat
         a fixed distance away from the target.
         """
-        dist_to_target = Sim.distance(self.position, other.position)
+        dist_to_other = Sim.distance(self.position, other.position)
         # Don't divide by 0 if self_position == other_position (or if very close)
-        limited_dist_to_target = max(100.0, dist_to_target)
+        limited_dist_to_target = max(100.0, dist_to_other)
         # Divide by 100 (or some other arbitrary number) to scale repulsive
         # force to distance units. Let the Target have a stronger repulsive
         # force than the other CubeSats.
-        divisor = 100 if isinstance(other, Target) else 50
+        divisor = 120 if isinstance(other, Target) else 80
         repulsive_force = 1/(limited_dist_to_target/divisor)**2
         return repulsive_force
 
     def stay_away_from_other_sats(self):
         repulsive_aggregate = Sim.v2_zero()
+        if isinstance(self, ImpairedCubeSat) and self.ticks > ImpairedCubeSat.directional_ticks_limit:
+            return repulsive_aggregate
         for sat in Sim.sim.sats:
             direction = self.position - sat.position
             repulsive_aggregate += direction * self.repulsive_force(sat)
@@ -128,14 +124,12 @@ class CubeSat(Satellite):
         CubeSat does not have a rotational velocity. It is always at a fixed angle,
         which changes frame-by-frame.
         """
-        if not Sim.recentering:
-            angle_correction = self.angle_correction( )
-            self.update_angle(angle_correction)
+        angle_correction = self.angle_correction( )
+        self.update_angle(angle_correction)
 
         velocity_correction = self.velocity_correction( )
         self.update_velocity(velocity_correction)
         self.update_position()
-        super().update()
 
     def update_velocity(self, correction):
         """
@@ -147,10 +141,6 @@ class CubeSat(Satellite):
         """
         self.velocity += correction
         Satellite.limit_velocity(self.velocity, CubeSat.max_velocity)
-        # If we are too close to the target, backpedal faster. (Very ad hoc.)
-        dist_to_target = Sim.distance(self.position, Sim.sim.target.position)
-        velocity_multiplier = max(1.0, (125/max(dist_to_target, 50))**2)
-        self.velocity *= velocity_multiplier
 
     def velocity_correction(self):
         """ Compute CubeSat velocity correction for the current frame update. """
@@ -169,15 +159,6 @@ class ImpairedCubeSat(CubeSat):
         self.ticks = 0
         super().__init__(pos, vel, angle, image)
 
-    def allow_angle_correction(self):
-        return self.ticks == 0
-
-    def allow_position_change(self):
-        return self.ticks > 0
-
-    def allow_velocity_correction(self):
-        return 0 < self.ticks < 6
-
     def angle_correction(self):
         """ Compute CubeSat angle correction for the current frame update. """
         self.velocity = Sim.v2_zero()
@@ -193,18 +174,20 @@ class ImpairedCubeSat(CubeSat):
         CubeSat does not have a rotational velocity. It is always at a fixed angle,
         which changes frame-by-frame.
         """
-        if not Sim.recentering and self.allow_angle_correction():
-            angle_correction = self.angle_correction()
+        # Update the angle when ticks == 0. Keep it at 0 until angle is correct.
+        if self.ticks == 0:
+            angle_correction = super().angle_correction( )
             self.update_angle(angle_correction)
+            # If we are pointing to the target, switch to directional mode (ticks = 1).
+            if abs(angle_correction) < 1:
+                self.ticks = 1
+            return
 
-        if self.allow_velocity_correction():
-            velocity_correction = self.velocity_correction()
-            self.update_velocity(velocity_correction)
-        if self.ticks > 0:
-            self.ticks = (self.ticks + 1) % ImpairedCubeSat.directional_ticks_limit
-        if self.allow_position_change():
-            self.update_position()
-        super().update()
+        # Otherwise, update the velocity and position for ImpairedCubeSat.directional_ticks_limit
+        velocity_correction = self.velocity_correction()
+        self.update_velocity(velocity_correction)
+        self.update_position()
+        self.ticks = (self.ticks + 1) % ImpairedCubeSat.directional_ticks_limit
 
 
 class Target(Satellite):
@@ -227,7 +210,6 @@ class Target(Satellite):
         if not self.fixed:
             self.update_velocity( )
         self.update_position()
-        super().update()
 
     def update_velocity(self, _correction=None):
         """
@@ -267,10 +249,6 @@ class Sim:
     # As both window and plane dimensions. (0,0) is at the upper left.
     window_width = 800   # pixels
     window_height = 800  # pixels
-
-    # recenter_mode:    False: the objects are unable to penetrate the window borders. (Not currently working.)
-    #                   True: the object are recentered in the window when they approach a window border
-    recenter_mode = True
 
     # Recentering is occuring.
     recentering = False
@@ -371,8 +349,14 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            for sat in self.sats:
-                sat.update()
+            if not Sim.recentering and any(Sim.at_edge_of_screen(sat) for sat in self.sats):
+                Sim.recentering = True
+
+            if Sim.recentering:
+                Sim.recenter_all()
+            else:
+                for sat in self.sats:
+                    sat.update()
 
             self.refresh_screen()
             self.clock.tick(Sim.FPS)
@@ -403,5 +387,4 @@ class Sim:
 
 if __name__ == '__main__':
     # Displays the unimpaired CubeSat in front of the impaired CubeSate
-    Sim(print_ids=False).run([CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(), CubeSat()],
-                             Target(fixed=True))
+    Sim(print_ids=False).run([CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
