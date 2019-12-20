@@ -105,7 +105,7 @@ class CubeSat(Satellite):
         # Divide by 100 (or some other arbitrary number) to scale repulsive
         # force to distance units. Could let the Target have a stronger repulsive
         # force than the other CubeSats.
-        divisor = 100  # if isinstance(other, Target) else 80
+        divisor = 200 if len(Sim.sim.sats) <= 3 else 100
         repulsive_force = 1/(limited_dist_to_target/divisor)**2
         return repulsive_force
 
@@ -124,10 +124,10 @@ class CubeSat(Satellite):
         CubeSat does not have a rotational velocity. It is always at a fixed angle,
         which changes frame-by-frame.
         """
-        angle_correction = self.angle_correction( )
+        angle_correction = self.angle_correction()
         self.update_angle(angle_correction)
 
-        velocity_correction = self.velocity_correction( )
+        velocity_correction = self.velocity_correction()
         self.update_velocity(velocity_correction)
         self.update_position()
 
@@ -176,7 +176,7 @@ class ImpairedCubeSat(CubeSat):
         """
         # Update the angle when ticks == 0. Keep it at 0 until angle is correct.
         if self.ticks == 0:
-            angle_correction = super().angle_correction( )
+            angle_correction = super().angle_correction()
             self.update_angle(angle_correction)
             # If we are pointing to the target, switch to directional mode (ticks = 1).
             if abs(angle_correction) < 1:
@@ -208,7 +208,7 @@ class Target(Satellite):
 
     def update(self):
         if not self.fixed:
-            self.update_velocity( )
+            self.update_velocity()
         self.update_position()
 
     def update_velocity(self, _correction=None):
@@ -386,5 +386,19 @@ class Sim:
 
 
 if __name__ == '__main__':
-    # Displays the unimpaired CubeSat in front of the impaired CubeSate
-    Sim(print_ids=False).run([CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
+    # When the Target is not fixed, it moves slightly faster  than the CubeSats
+    # Select one of the runs below
+
+    # A standard run: one CubeSat and a moving target
+    # Sim().run([CubeSat()], Target())
+
+    # An impared CubeSat and a moving target. Impaired CubeSats can't move directionally while they are turning.
+    # Sim().run([ImpairedCubeSat()], Target())
+
+    # A normal CubeSat displayed in front of an impaired CubeSate.
+    # Sim().run([ImpairedCubeSat(), CubeSat()], Target())
+
+    # A normal CubeSat in front of a impaired CubeSate and another one behind. The Target is fixed.
+    # With a fixed Target, the three CubeSats form a symmetric triangle around the Target.
+    # Then motion essentially ceases.
+    Sim().run([CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
