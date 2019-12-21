@@ -100,13 +100,14 @@ class CubeSat(Satellite):
         a fixed distance away from the target.
         """
         dist_to_other = Sim.distance(self.position, other.position)
-        # Don't divide by 0 if self_position == other_position (or if very close)
-        limited_dist_to_target = max(100.0, dist_to_other)
-        # Divide by 100 (or some other arbitrary number) to scale repulsive
-        # force to distance units. Could let the Target have a stronger repulsive
-        # force than the other CubeSats.
-        divisor = 200 if len(Sim.sim.sats) <= 3 else 100
-        repulsive_force = 1/(limited_dist_to_target/divisor)**2
+        # Don't divide by 0 if self_position very close to other_position.
+        limited_dist_to_target = max(1.0, dist_to_other)
+        # Divide distance by an arbitrary number to scale repulsive force to distance units.
+        # Could use this to let the Target have a stronger repulsive force than the other CubeSats.
+        divisor = 100
+        # Repulsive force shrinks with the nth power of distance.
+        n = 3
+        repulsive_force = 1/(limited_dist_to_target/divisor)**n
         return repulsive_force
 
     def stay_away_from_other_sats(self):
@@ -251,7 +252,7 @@ class Sim:
     window_height = 800  # pixels
 
     # Recentering is occuring.
-    recentering = False
+    point_to_center = None
 
     # How close (in pixels) recentering must get to satisfy recentering.
     centered_enough = 50
@@ -301,21 +302,25 @@ class Sim:
     @staticmethod
     def recenter_all():
         """
+        If one satellite is out of bounds, recenter the average position of all the satellites.
+        Don't select another point to recenter until the current point is recentered. Otherwise
+        may jump back and forth among different average points on each frame.
         Take one step (frame) in the recentering process.
         """
-        sum_positions = Sim.v2_zero()
-        for sat in Sim.sim.sats:
-            sum_positions += sat.position
-        center_point = sum_positions/(1+len(Sim.sim.cubesats))
-        correction = Sim.screen_center() - center_point
-        if max([abs(correction.x), abs(correction.y)]) < 5:
-            Sim.recentering = False
-            return
-        max_speed = 2.5*min(CubeSat.max_velocity, Target.max_velocity)
-        max_dir_speed = max([abs(correction.x), abs(correction.y)])
-        correction *= max_speed/max_dir_speed
+        if Sim.point_to_center is None:
+            sum_positions = Sim.v2_zero()
+            for sat in Sim.sim.sats:
+                sum_positions += sat.position
+            Sim.point_to_center = sum_positions/(len(Sim.sim.sats))
+        raw_correction = Sim.screen_center() - Sim.point_to_center
+        max_speed = 5*max(CubeSat.max_velocity, Target.max_velocity)
+        max_dir_speed = max([abs(raw_correction.x), abs(raw_correction.y)])
+        correction = raw_correction * max_speed/max_dir_speed
         for sat in Sim.sim.sats:
             sat.position += correction
+        Sim.point_to_center += correction
+        if max([abs(raw_correction.x), abs(raw_correction.y)]) < 5:
+            Sim.point_to_center = None
 
     def refresh_screen(self):
         """
@@ -323,7 +328,7 @@ class Sim:
         put the two objects in the surface. Then make it visible.
         """
         self.screen.fill((0, 0, 0))
-        if Sim.recentering:
+        if Sim.point_to_center:
             font = pygame.font.Font(None, 36)
             text = font.render("Recentering", 1, (150, 250, 250))
             self.screen.blit(text, Sim.V2(50, 50))
@@ -340,8 +345,9 @@ class Sim:
         """ Create CubeSat and the target and run the main loop. """
         self.cubesats = cubesats
         self.target = target if target else Target()
-        # Displays the satellites in front of the target
-        self.sats = [self.target] + self.cubesats
+        # Displays the satellites in front of the target and the
+        # satellites themselves in reverse order of original list
+        self.sats = [self.target] + list(reversed(self.cubesats))
 
         while not self.exit:
             # Event queue.  Not used here, but standard in pygame applications.
@@ -349,10 +355,7 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            if not Sim.recentering and any(Sim.at_edge_of_screen(sat) for sat in self.sats):
-                Sim.recentering = True
-
-            if Sim.recentering:
+            if Sim.point_to_center is not None or any(Sim.at_edge_of_screen(sat) for sat in self.sats):
                 Sim.recenter_all()
             else:
                 for sat in self.sats:
@@ -387,18 +390,30 @@ class Sim:
 
 if __name__ == '__main__':
     # When the Target is not fixed, it moves slightly faster  than the CubeSats
-    # Select one of the runs below
+    # Select one of the runs below.
+
+    # Can adjust repulsive force parameters in CubeSat.repulsive_force()
+    # If too strong and CubeSats are pushed to two screen edges, system freezes
+    # because it can't recenter.
 
     # A standard run: one CubeSat and a moving target
     # Sim().run([CubeSat()], Target())
 
-    # An impared CubeSat and a moving target. Impaired CubeSats can't move directionally while they are turning.
+    # An impared CubeSat and a moving target. Impaired CubeSats can't move directionally
+    # while they are rotating.
     # Sim().run([ImpairedCubeSat()], Target())
 
     # A normal CubeSat displayed in front of an impaired CubeSate.
-    # Sim().run([ImpairedCubeSat(), CubeSat()], Target())
+    # Sim().run([CubeSat(), ImpairedCubeSat()], Target())
 
     # A normal CubeSat in front of a impaired CubeSate and another one behind. The Target is fixed.
     # With a fixed Target, the three CubeSats form a symmetric triangle around the Target.
     # Then motion essentially ceases.
-    Sim().run([CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
+    # Sim().run([CubeSat(), ImpairedCubeSat(), CubeSat()], Target(fixed=True))
+
+    # A swarm of CubeSats. The Target is fixed or not. With a fixed Target,
+    # the CubeSats create a symmetric formation around the Target, and motion mainly ceases.
+    # If more than 8 CubeSats, formation may not become symmetric.
+    Sim().run([CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(),
+               CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat()],
+              Target(fixed=True))
