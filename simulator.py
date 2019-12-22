@@ -255,18 +255,21 @@ class Sim:
     # the CubeSats and the target
     sim = None
 
-    def __init__(self, print_ids=False):
+    def __init__(self, cubesats, target=None, print_ids=False):
         # Make this Sim object itself available in the Sim class.
         # The satellites use it to retrieve information about each other.
         # (That's a cheat.)
         Sim.sim = self
         self.print_ids = print_ids
 
-        # USed during recentering.
-        self.point_to_center = None
+        self.screen_center = Sim.V2(Sim.window_width, Sim.window_height) / 2
+
+        # Used during recentering.
+        self.point_to_be_centered = None
         self.recenter_correction = None
         # How close (in pixels) recentering must get to satisfy recentering.
         self.centered_enough = 5
+        self.rescaling = False
 
         # Every once in a while, system gets stuck in pygame.init()
         print('Starting pygame.init()')
@@ -278,9 +281,13 @@ class Sim:
         self.clock = pygame.time.Clock()
         self.exit = False
 
-        self.cubesats = None
-        self.stats = None
-        self.target = None
+        # Establish initial formation
+        self.cubesats = cubesats
+        self.target = target if target else Target()
+        # Displays the satellites in front of the target and the
+        # satellites themselves in reverse order of original list
+        self.sats = [self.target] + list(reversed(self.cubesats))
+
 
     def add_obj_to_screen(self, obj):
         """ Update the screen "surface" before displaying it. """
@@ -309,26 +316,30 @@ class Sim:
         may jump back and forth among different average points on each frame.
         Take one step (frame) in the recentering process.
         """
-        if self.point_to_center is None:
+        if self.point_to_be_centered is None:
             sum_positions = Sim.v2_zero()
             for sat in Sim.sim.sats:
                 sum_positions += sat.position
-            self.point_to_center = sum_positions/(len(Sim.sim.sats))
-            raw_correction = Sim.screen_center() - self.point_to_center
+            swarm_center = sum_positions/(len(Sim.sim.sats))
+            self.point_to_be_centered = swarm_center
+            self.rescaling = self.point_to_be_centered == self.screen_center
+            if self.rescaling:
+                for sat in Sim.sim.sats:
+                    sat.position = 0.997 * sat.position + 0.003 * self.screen_center
+                self.point_to_be_centered = None
+                return
+            raw_correction = self.screen_center - self.point_to_be_centered
             max_speed = 5*max(CubeSat.max_velocity, Target.max_velocity)
             max_dir_speed = max([abs(raw_correction.x), abs(raw_correction.y)])
-            correction = raw_correction * max_speed/max_dir_speed
-            # In case the previous line overdoes the correction.
-            correction.x = copysign(min(abs(correction.x), abs(raw_correction.x)), raw_correction.x)
-            correction.y = copysign(min(abs(correction.y), abs(raw_correction.y)), raw_correction.y)
-            self.recenter_correction = correction
+            coeff = min(max_speed, max_dir_speed)/max_dir_speed if max_dir_speed > 1 else 1
+            self.recenter_correction = raw_correction * coeff
 
         for sat in Sim.sim.sats:
             sat.position += self.recenter_correction
-        self.point_to_center += self.recenter_correction
-        raw_correction = Sim.screen_center( ) - self.point_to_center
+        self.point_to_be_centered += self.recenter_correction
+        raw_correction = self.screen_center - self.point_to_be_centered
         if max([abs(raw_correction.x), abs(raw_correction.y)]) < self.centered_enough:
-            self.point_to_center = self.recenter_correction = None
+            self.point_to_be_centered = self.recenter_correction = None
 
     def refresh_screen(self):
         """
@@ -336,9 +347,11 @@ class Sim:
         put the two objects in the surface. Then make it visible.
         """
         self.screen.fill((0, 0, 0))
-        if self.point_to_center:
+        if self.point_to_be_centered or self.rescaling:
             font = pygame.font.Font(None, 36)
-            text = font.render("Recentering", 1, (150, 250, 250))
+            label = "Rescaling" if self.rescaling else "Recentering"
+            self.rescaling = False
+            text = font.render(label, 1, (150, 250, 250))
             self.screen.blit(text, Sim.V2(50, 50))
         for sat in self.sats:
             self.add_obj_to_screen(sat)
@@ -348,22 +361,15 @@ class Sim:
     def roundV2(v2: Vector2, prec=2):
         return Sim.V2(round(v2.x, prec), round(v2.y, prec))
 
-    # noinspection PyAttributeOutsideInit
-    def run(self, cubesats, target=None):
-        """ Create CubeSat and the target and run the main loop. """
-        self.cubesats = cubesats
-        self.target = target if target else Target()
-        # Displays the satellites in front of the target and the
-        # satellites themselves in reverse order of original list
-        self.sats = [self.target] + list(reversed(self.cubesats))
-
+    def run(self):
+        """ The main loop """
         while not self.exit:
             # Event queue.  Not used here, but standard in pygame applications.
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            if self.point_to_center is not None or any(Sim.at_edge_of_screen(sat) for sat in self.sats):
+            if self.point_to_be_centered is not None or any(Sim.at_edge_of_screen(sat) for sat in self.sats):
                 self.recenter_all()
             else:
                 for sat in self.sats:
@@ -373,14 +379,6 @@ class Sim:
             self.clock.tick(Sim.FPS)
 
         pygame.quit()
-
-    @staticmethod
-    def screen_center():
-        """
-        Can't make this a class constant because it uses a class function.
-        (There's probably a better way.)
-        """
-        return Sim.V2(Sim.window_width, Sim.window_height) / 2
 
     @staticmethod
     def V2(x, y):
@@ -422,6 +420,7 @@ if __name__ == '__main__':
     # A swarm of CubeSats. The Target is fixed or not. With a fixed Target,
     # the CubeSats create a symmetric formation around the Target, and motion mainly ceases.
     # If more than 8 CubeSats, formation may not become symmetric.
-    Sim().run([CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat(),
-               CubeSat(), ImpairedCubeSat(), CubeSat(), ImpairedCubeSat()],
-              Target(fixed=True))
+    sim = Sim([CubeSat(pos=Sim.V2(850, 50)), ImpairedCubeSat(pos=Sim.V2(0, 0)), CubeSat(), ImpairedCubeSat(),
+               CubeSat(pos=Sim.V2(50, 850)), ImpairedCubeSat(pos=Sim.V2(900, 900)), CubeSat(), ImpairedCubeSat()],
+              Target(fixed=True, pos=Sim.V2(850, 850)))
+    sim.run()
