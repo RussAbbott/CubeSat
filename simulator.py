@@ -265,7 +265,7 @@ class Sim:
         Sim.sim = self
         self.print_ids = print_ids
 
-        # Cannot do these at the Sim level.
+        # Cannot do this at the Sim level.
         self.screen_center = Sim.V2(Sim.window_width, Sim.window_height) / 2
 
         # Used during recentering.
