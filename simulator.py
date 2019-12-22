@@ -14,6 +14,7 @@ Sim: The simulation infrastructure
 
 
 class Satellite:
+    """ A generic satellite """
 
     max_angle_change = 1  # degrees/frame
     sat_number = 0
@@ -61,7 +62,7 @@ class Satellite:
         new_angle = Satellite.normalize_angle(self.angle + correction)
         self.angle = new_angle
 
-    def update_velocity(self, correction):
+    def update_velocity(self, _correction):
         """ Update CubeSat's velocity differently from the target's velocity. """
         pass
 
@@ -74,9 +75,8 @@ class Satellite:
 
 
 class CubeSat(Satellite):
+    """ A CubeSat """
 
-    # pygame uses degrees rather than radians
-    # cubesat_max_angle_change = 0.5  # degrees/frame
     max_velocity = 1.0  # pixels / frame
 
     def __init__(self, pos=None, vel=None, angle=None, image='CubeSat.png'):
@@ -100,7 +100,7 @@ class CubeSat(Satellite):
         a fixed distance away from the target.
         """
         dist_to_other = Sim.distance(self.position, other.position)
-        # Don't divide by 0 if self_position very close to other_position.
+        # Don't divide by 0 if self.position very close to other.position.
         limited_dist_to_target = max(1.0, dist_to_other)
         # Divide distance by an arbitrary number to scale repulsive force to distance units.
         # Could use this to let the Target have a stronger repulsive force than the other CubeSats.
@@ -153,6 +153,7 @@ class CubeSat(Satellite):
 
 
 class ImpairedCubeSat(CubeSat):
+    """ A CubeSat that can't rotate and move directionally at the same time. """
 
     directional_ticks_limit = 20
 
@@ -175,7 +176,7 @@ class ImpairedCubeSat(CubeSat):
         CubeSat does not have a rotational velocity. It is always at a fixed angle,
         which changes frame-by-frame.
         """
-        # Update the angle when ticks == 0. Keep it at 0 until angle is correct.
+        # Update the angle when ticks == 0. Keep ticks at 0 until angle is correct.
         if self.ticks == 0:
             angle_correction = super().angle_correction()
             self.update_angle(angle_correction)
@@ -192,6 +193,7 @@ class ImpairedCubeSat(CubeSat):
 
 
 class Target(Satellite):
+    """ The target objecct, treated as a subclass of Satellite. """
 
     # Probability of changing velocity on any frame.
     prob_velocity_change = 0.05  
@@ -225,9 +227,9 @@ class Target(Satellite):
             Satellite.limit_velocity(self.velocity, Target.max_velocity)
 
         # If too far away from any CubeSat, reverse direction
-        if max([Sim.distance(self.position, cubesat.position) for cubesat in Sim.sim.cubesats]) > \
-            Sim.window_width * 0.6:
-            self.velocity *= -0.01  # uniform(-0.2, -0.2)
+        dist_to_farthest_sat = max([Sim.distance(self.position, cubesat.position) for cubesat in Sim.sim.cubesats])
+        if dist_to_farthest_sat > Sim.window_width * 0.6:
+            self.velocity *= -0.01  
 
         # Ensure that the target is moving at a reasonable speed.
         # Allow it to move faster than CubeSat.
@@ -243,6 +245,7 @@ class Target(Satellite):
 
 
 class Sim:
+    """ The simulation framework """
 
     FPS = 50
 
@@ -262,6 +265,7 @@ class Sim:
         Sim.sim = self
         self.print_ids = print_ids
 
+        # Cannot do these at the Sim level.
         self.screen_center = Sim.V2(Sim.window_width, Sim.window_height) / 2
 
         # Used during recentering.
@@ -275,6 +279,7 @@ class Sim:
         print('Starting pygame.init()')
         pygame.init()
         print('Finished pygame.init()')
+        
         pygame.display.set_caption("CubeSat Simulator")
         window_dimensions = (Sim.window_width, Sim.window_height)
         self.screen = pygame.display.set_mode(window_dimensions)
@@ -287,7 +292,6 @@ class Sim:
         # Displays the satellites in front of the target and the
         # satellites themselves in reverse order of original list
         self.sats = [self.target] + list(reversed(self.cubesats))
-
 
     def add_obj_to_screen(self, obj):
         """ Update the screen "surface" before displaying it. """
@@ -302,8 +306,8 @@ class Sim:
         the window within which the simulation is run, not the satellite, which
         may or may not be within the window boundaries.
         """
-        return sat.position.x < 50 or sat.position.x > Sim.window_width-50 or \
-               sat.position.y < 50 or sat.position.y > Sim.window_height - 50
+        return sat.position.x < 70 or sat.position.x > Sim.window_width-70 or \
+               sat.position.y < 70 or sat.position.y > Sim.window_height - 70
 
     @staticmethod
     def distance(a, b):
@@ -317,17 +321,21 @@ class Sim:
         Take one step (frame) in the recentering process.
         """
         if self.point_to_be_centered is None:
+            # Not currently recentering. Find the swarm center and recenter that point.
             sum_positions = Sim.v2_zero()
             for sat in Sim.sim.sats:
                 sum_positions += sat.position
             swarm_center = sum_positions/(len(Sim.sim.sats))
             self.point_to_be_centered = swarm_center
+            
+            # If swarm_center is already centered, rescale.
             self.rescaling = self.point_to_be_centered == self.screen_center
             if self.rescaling:
                 for sat in Sim.sim.sats:
                     sat.position = 0.997 * sat.position + 0.003 * self.screen_center
                 self.point_to_be_centered = None
                 return
+            
             raw_correction = self.screen_center - self.point_to_be_centered
             max_speed = 5*max(CubeSat.max_velocity, Target.max_velocity)
             max_dir_speed = max([abs(raw_correction.x), abs(raw_correction.y)])
@@ -387,11 +395,8 @@ class Sim:
 
     @staticmethod
     def v2_zero():
-        """
-        Can't make this a class constant because it uses a class function.
-        (There's probably a better way.)
-        """
         return Sim.V2(0, 0)
+
 
 
 if __name__ == '__main__':
@@ -419,7 +424,8 @@ if __name__ == '__main__':
 
     # A swarm of CubeSats. The Target is fixed or not. With a fixed Target,
     # the CubeSats create a symmetric formation around the Target, and motion mainly ceases.
-    # If more than 8 CubeSats, formation may not become symmetric.
+    # If more than 8 CubeSats, formation may not become symmetric. The designated initial
+    # positions force scaling at the start to demonstrate that features.
     sim = Sim([CubeSat(pos=Sim.V2(850, 50)), ImpairedCubeSat(pos=Sim.V2(0, 0)), CubeSat(), ImpairedCubeSat(),
                CubeSat(pos=Sim.V2(50, 850)), ImpairedCubeSat(pos=Sim.V2(900, 900)), CubeSat(), ImpairedCubeSat()],
               Target(fixed=True, pos=Sim.V2(850, 850)))
