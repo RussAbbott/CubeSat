@@ -251,14 +251,8 @@ class Sim:
     window_width = 800   # pixels
     window_height = 800  # pixels
 
-    # Recentering is occuring.
-    point_to_center = None
-
-    # How close (in pixels) recentering must get to satisfy recentering.
-    centered_enough = 50
-
     # The simulation object itself is available here. It includes references to both
-    # CubeSat and the target
+    # the CubeSats and the target
     sim = None
 
     def __init__(self, print_ids=False):
@@ -267,8 +261,17 @@ class Sim:
         # (That's a cheat.)
         Sim.sim = self
         self.print_ids = print_ids
-        
+
+        # USed during recentering.
+        self.point_to_center = None
+        self.recenter_correction = None
+        # How close (in pixels) recentering must get to satisfy recentering.
+        self.centered_enough = 5
+
+        # Every once in a while, system gets stuck in pygame.init()
+        print('Starting pygame.init()')
         pygame.init()
+        print('Finished pygame.init()')
         pygame.display.set_caption("CubeSat Simulator")
         window_dimensions = (Sim.window_width, Sim.window_height)
         self.screen = pygame.display.set_mode(window_dimensions)
@@ -299,28 +302,33 @@ class Sim:
     def distance(a, b):
         return sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
 
-    @staticmethod
-    def recenter_all():
+    def recenter_all(self):
         """
         If one satellite is out of bounds, recenter the average position of all the satellites.
         Don't select another point to recenter until the current point is recentered. Otherwise
         may jump back and forth among different average points on each frame.
         Take one step (frame) in the recentering process.
         """
-        if Sim.point_to_center is None:
+        if self.point_to_center is None:
             sum_positions = Sim.v2_zero()
             for sat in Sim.sim.sats:
                 sum_positions += sat.position
-            Sim.point_to_center = sum_positions/(len(Sim.sim.sats))
-        raw_correction = Sim.screen_center() - Sim.point_to_center
-        max_speed = 5*max(CubeSat.max_velocity, Target.max_velocity)
-        max_dir_speed = max([abs(raw_correction.x), abs(raw_correction.y)])
-        correction = raw_correction * max_speed/max_dir_speed
+            self.point_to_center = sum_positions/(len(Sim.sim.sats))
+            raw_correction = Sim.screen_center() - self.point_to_center
+            max_speed = 5*max(CubeSat.max_velocity, Target.max_velocity)
+            max_dir_speed = max([abs(raw_correction.x), abs(raw_correction.y)])
+            correction = raw_correction * max_speed/max_dir_speed
+            # In case the previous line overdoes the correction.
+            correction.x = copysign(min(abs(correction.x), abs(raw_correction.x)), raw_correction.x)
+            correction.y = copysign(min(abs(correction.y), abs(raw_correction.y)), raw_correction.y)
+            self.recenter_correction = correction
+
         for sat in Sim.sim.sats:
-            sat.position += correction
-        Sim.point_to_center += correction
-        if max([abs(raw_correction.x), abs(raw_correction.y)]) < 5:
-            Sim.point_to_center = None
+            sat.position += self.recenter_correction
+        self.point_to_center += self.recenter_correction
+        raw_correction = Sim.screen_center( ) - self.point_to_center
+        if max([abs(raw_correction.x), abs(raw_correction.y)]) < self.centered_enough:
+            self.point_to_center = self.recenter_correction = None
 
     def refresh_screen(self):
         """
@@ -328,7 +336,7 @@ class Sim:
         put the two objects in the surface. Then make it visible.
         """
         self.screen.fill((0, 0, 0))
-        if Sim.point_to_center:
+        if self.point_to_center:
             font = pygame.font.Font(None, 36)
             text = font.render("Recentering", 1, (150, 250, 250))
             self.screen.blit(text, Sim.V2(50, 50))
@@ -355,8 +363,8 @@ class Sim:
                 if event.type == pygame.QUIT:
                     self.exit = True
 
-            if Sim.point_to_center is not None or any(Sim.at_edge_of_screen(sat) for sat in self.sats):
-                Sim.recenter_all()
+            if self.point_to_center is not None or any(Sim.at_edge_of_screen(sat) for sat in self.sats):
+                self.recenter_all()
             else:
                 for sat in self.sats:
                     sat.update()
